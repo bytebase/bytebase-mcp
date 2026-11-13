@@ -122,6 +122,8 @@ export class Upstream {
         if (this.client === client) this.client = undefined;
       };
       client.onerror = (err) => {
+        // Closing a session aborts its SSE stream; that is not an error worth a line.
+        if (/AbortError|operation was aborted/.test(describe(err))) return;
         log(`upstream error: ${describe(err)}`);
       };
 

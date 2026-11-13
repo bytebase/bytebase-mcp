@@ -13,6 +13,21 @@ import { loadBundledTools } from "./tools.js";
 import { Upstream, describe } from "./upstream.js";
 import { PACKAGE_VERSION } from "./version.js";
 
+/**
+ * Used when the Bytebase release the bundle was read from sent no initialize
+ * instructions (releases before the server shipped them). Newer dumps carry
+ * Bytebase's own text, which wins.
+ */
+const FALLBACK_INSTRUCTIONS = `Bytebase governs access to databases and changes to them. Every call is also limited by the signed-in account's permissions and the workspace's MCP access policy.
+
+Choose the tool by task:
+- Read data: query_database. Before you write SQL for a database, read its schema with get_schema.
+- Inspect a schema: get_schema.
+- Change a database: propose_database_change. It creates the plan and the issue and runs the plan checks; approval and rollout follow the project's policy.
+- Anything else: search_api to find the operation and its request schema, then call_api.
+
+When Bytebase refuses a call, the error states the reason and may name a next step.`;
+
 const NO_INSTANCE_MESSAGE =
   "No Bytebase instance is configured. Set BYTEBASE_URL to your Bytebase external URL (for example https://bytebase.example.com) in the MCP server's environment and restart the server. See https://docs.bytebase.com/integrations/mcp";
 
@@ -29,7 +44,7 @@ export function createServer(config: Config): { server: Server; upstream?: Upstr
     { name: "bytebase", title: "Bytebase", version: PACKAGE_VERSION },
     {
       capabilities: { tools: { listChanged: true } },
-      instructions: bundled.instructions,
+      instructions: bundled.instructions.trim().length > 0 ? bundled.instructions : FALLBACK_INSTRUCTIONS,
     },
   );
 

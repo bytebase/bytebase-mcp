@@ -70,6 +70,21 @@ Every command takes `--url <bytebase-url>` in place of `BYTEBASE_URL`.
 The tools are Bytebase's. The list below is generated from the release named in `src/tools.json`; a connected instance's live list replaces it, so an older or newer Bytebase shows its own tools.
 
 <!-- tools:start -->
+Generated from Bytebase 3.24.1.
+
+| Tool | Purpose |
+| --- | --- |
+| `call_api` | Execute a Bytebase API endpoint. |
+| `decide_issue` | Approve or reject a Bytebase issue at its current approval step. |
+| `get_schema` | Inspect a Bytebase database's schema. |
+| `get_skill` | Get step-by-step guides for Bytebase tasks. |
+| `grant_masking_exemption` | Exempt one member from data masking in a Bytebase project, for one database (optionally one schema, table or column) or for every database in the project. |
+| `propose_database_change` | Run DDL/DML changes (ALTER TABLE, CREATE TABLE, INSERT, UPDATE, migrations) against a Bytebase database. |
+| `query_database` | Execute a SQL query against a Bytebase database. |
+| `reauthorize` | Log out the current MCP OAuth connection so the client can run OAuth again. |
+| `revoke_masking_exemption` | Remove one member's masking exemption in a Bytebase project. |
+| `search_api` | Discover Bytebase API endpoints. |
+| `set_just_in_time_access` | Turn just-in-time access on or off for one Bytebase project. |
 <!-- tools:end -->
 
 What each session may do is set on the instance: the signed-in user's permissions, narrowed by the workspace [MCP access policy](https://docs.bytebase.com/integrations/mcp#access-policy) (Disabled, Read-only, Read-write). Actions that need confirmation (approving an issue, granting a masking exemption) show a confirmation form in clients that support MCP elicitation; the package forwards the form to your client.
