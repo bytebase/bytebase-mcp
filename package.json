@@ -31,6 +31,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test test/",
     "sync-tools": "node scripts/sync-tools.mjs",
+    "render-readme": "node scripts/render-readme.mjs",
     "sync-version": "node scripts/sync-version.mjs",
     "version": "npm run sync-version && git add server.json",
     "prepublishOnly": "npm run build && npm test"

@@ -136,7 +136,7 @@ export class Upstream {
           log("signed in; connecting");
           continue;
         }
-        throw new Error(`cannot connect to ${this.endpoint}: ${describe(err)}`, { cause: err });
+        throw new Error(`cannot connect to ${this.endpoint}: ${describe(err)}${hint(err)}`, { cause: err });
       }
     }
   }
@@ -154,6 +154,18 @@ function isConnectionLoss(err: unknown): boolean {
     text.includes("http 404") ||
     text.includes("http 401")
   );
+}
+
+/** A next step for the errors users hit most. */
+function hint(err: unknown): string {
+  const text = describe(err);
+  if (/Protected resource .* does not match/i.test(text)) {
+    return ". BYTEBASE_URL must be the instance's external URL (Settings > General > External URL), because Bytebase binds MCP tokens to it";
+  }
+  if (/sign-in timed out/i.test(text)) {
+    return ". Run `bytebase-mcp login` to sign in again";
+  }
+  return "";
 }
 
 export function describe(err: unknown): string {

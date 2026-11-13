@@ -71,3 +71,5 @@ if (previous && !added.length && !removed.length) {
   const changed = tools.filter((t) => JSON.stringify(t) !== JSON.stringify(previous.tools.find((p) => p.name === t.name))).map((t) => t.name);
   console.log(changed.length ? `  changed: ${changed.join(", ")}` : "  no tool changed");
 }
+
+await import("./render-readme.mjs");
