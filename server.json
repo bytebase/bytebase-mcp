@@ -1,0 +1,52 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.bytebase/bytebase-mcp",
+  "title": "Bytebase",
+  "description": "Query, inspect, and change databases through Bytebase's governed workflow: approvals, access control, data masking, and audit logging stay on your Bytebase instance.",
+  "repository": {
+    "url": "https://github.com/bytebase/bytebase-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://docs.bytebase.com/integrations/mcp",
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@bytebase/bytebase-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "BYTEBASE_URL",
+          "description": "External URL of your Bytebase instance (e.g. https://bytebase.example.com). The package connects to <BYTEBASE_URL>/mcp and signs you in with the instance's OAuth.",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "BYTEBASE_MCP_HOME",
+          "description": "Directory for the OAuth token files (default: ~/.config/bytebase-mcp)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "BYTEBASE_MCP_CALLBACK_PORT",
+          "description": "Loopback port that receives the OAuth redirect during sign-in (default: 51789)",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "BYTEBASE_MCP_NO_BROWSER",
+          "description": "Set to 1 to print the sign-in URL instead of opening a browser",
+          "isRequired": false,
+          "format": "boolean",
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

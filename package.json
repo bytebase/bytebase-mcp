@@ -1,0 +1,57 @@
+{
+  "name": "@bytebase/bytebase-mcp",
+  "version": "0.1.0",
+  "mcpName": "io.github.bytebase/bytebase-mcp",
+  "description": "Official MCP server package for Bytebase. Ships the tool definitions of Bytebase's built-in MCP server and forwards every call to your Bytebase instance over its OAuth-protected /mcp endpoint.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bytebase/bytebase-mcp.git"
+  },
+  "homepage": "https://docs.bytebase.com/integrations/mcp",
+  "bugs": {
+    "url": "https://github.com/bytebase/bytebase-mcp/issues"
+  },
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "bytebase-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc && node scripts/copy-assets.mjs",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/",
+    "sync-tools": "node scripts/sync-tools.mjs",
+    "sync-version": "node scripts/sync-version.mjs",
+    "version": "npm run sync-version && git add server.json",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "bytebase",
+    "database",
+    "sql",
+    "schema-migration",
+    "database-governance",
+    "postgres",
+    "mysql"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.7.2"
+  }
+}

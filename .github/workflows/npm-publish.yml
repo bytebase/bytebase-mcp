@@ -1,0 +1,135 @@
+# Publishes @bytebase/bytebase-mcp to npm and registers it in the MCP Registry.
+# Mirrors bytebase/dbhub's workflow.
+#
+# Triggers:
+#   1. Manual (workflow_dispatch) with an optional version and npm tag.
+#   2. A push to main that changes package.json: publishes when the version is
+#      new on npm, skips otherwise.
+#
+# After npm publish, the same job runs `mcp-publisher publish` with server.json.
+# The registry checks that the npm version exists first, so this ordering is
+# required, and the step is not gated on the npm step so a failed registration
+# can be retried by re-running the job.
+#
+# Authentication: npm OIDC trusted publishing (no token). Before the first run,
+# configure the trusted publisher at
+# https://www.npmjs.com/package/@bytebase/bytebase-mcp/access
+#   Organization: bytebase   Repository: bytebase-mcp   Workflow: npm-publish.yml
+# The MCP Registry side needs no secret either: `mcp-publisher login github-oidc`
+# proves the repository through GitHub's OIDC token, and the io.github.bytebase/*
+# namespace belongs to the bytebase GitHub org.
+
+name: Publish to npm and MCP Registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 0.1.0, 0.2.0-beta.1). Defaults to package.json."
+        required: false
+        default: ""
+      tag:
+        description: "npm dist-tag"
+        required: false
+        default: "latest"
+  push:
+    branches: [main]
+    paths: ["package.json"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      # OIDC trusted publishing needs npm 11.5+. Pinned to 11.x: npm 12.0.0's
+      # `publish --provenance` is broken.
+      - name: Upgrade npm
+        run: |
+          npm install -g npm@11
+          echo "npm version: $(npm --version)"
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+      - name: Decide whether to publish
+        run: |
+          CURRENT_VERSION=$(jq -r '.version' package.json)
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+            TAG="${{ inputs.tag }}"
+            SHOULD_PUBLISH="true"
+            jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
+            node scripts/sync-version.mjs
+          else
+            VERSION="${CURRENT_VERSION}"
+            if npm view "@bytebase/bytebase-mcp@${VERSION}" version &> /dev/null; then
+              echo "Version ${VERSION} already on npm; skipping."
+              SHOULD_PUBLISH="false"
+            else
+              SHOULD_PUBLISH="true"
+              if [[ "${VERSION}" == *"-"* ]]; then
+                TAG=$(echo "${VERSION}" | cut -d'-' -f2 | cut -d'.' -f1)
+              else
+                TAG="latest"
+              fi
+            fi
+          fi
+          echo "PACKAGE_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "NPM_TAG=${TAG:-latest}" >> "$GITHUB_ENV"
+          echo "SHOULD_PUBLISH=${SHOULD_PUBLISH}" >> "$GITHUB_ENV"
+
+      - name: Publish to npm
+        if: env.SHOULD_PUBLISH == 'true'
+        run: npm publish --access public --tag "${NPM_TAG}" --provenance
+
+      # ---- MCP Registry ----
+      - name: Check MCP Registry for existing version
+        run: |
+          NAME=$(jq -r '.name' server.json)
+          VERSION=$(jq -r '.version' server.json)
+          ENCODED_NAME=$(jq -rn --arg n "$NAME" '$n | @uri')
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://registry.modelcontextprotocol.io/v0/servers/${ENCODED_NAME}/versions/${VERSION}")
+          if [ "$STATUS" = "200" ]; then
+            echo "${NAME}@${VERSION} is already registered; skipping."
+            echo "SHOULD_PUBLISH_MCP=false" >> "$GITHUB_ENV"
+          else
+            echo "SHOULD_PUBLISH_MCP=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Wait for npm to serve the version
+        if: env.SHOULD_PUBLISH_MCP == 'true'
+        run: |
+          VERSION=$(jq -r '.version' server.json)
+          for attempt in $(seq 1 30); do
+            if npm view "@bytebase/bytebase-mcp@${VERSION}" version &> /dev/null; then
+              exit 0
+            fi
+            echo "Attempt ${attempt}/30: not visible yet, retrying in 10s"
+            sleep 10
+          done
+          echo "::error::@bytebase/bytebase-mcp@${VERSION} did not appear on npm within 5 minutes"
+          exit 1
+
+      - name: Install mcp-publisher
+        if: env.SHOULD_PUBLISH_MCP == 'true'
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/download/v1.7.9/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Login to MCP Registry
+        if: env.SHOULD_PUBLISH_MCP == 'true'
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        if: env.SHOULD_PUBLISH_MCP == 'true'
+        run: ./mcp-publisher publish
