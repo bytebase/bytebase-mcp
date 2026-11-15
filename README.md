@@ -99,6 +99,8 @@ Bytebase's refresh tokens are single-use and MCP clients start one process per s
 
 ## Development
 
+Design notes for reviewers and maintainers: [docs/DESIGN.md](docs/DESIGN.md).
+
 ```bash
 npm install
 npm run build
