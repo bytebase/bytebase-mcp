@@ -11,15 +11,18 @@ import {
   type ClientCapabilities,
   type ElicitRequest,
   type ElicitResult,
+  type Implementation,
   type ListToolsResult,
 } from "@modelcontextprotocol/sdk/types.js";
-import { FileOAuthClientProvider } from "./auth.js";
+import { FileOAuthClientProvider, SignInRequiredError, clientIdentity } from "./auth.js";
 import { mcpEndpoint, type Config } from "./config.js";
 import { log } from "./log.js";
-import { PACKAGE_VERSION } from "./version.js";
+
+/** The proxy sets no timeout of its own on a forwarded call (docs/DESIGN.md, D5). */
+const NO_TIMEOUT_MS = 2 ** 31 - 1;
 
 export interface UpstreamHooks {
-  /** Capabilities to declare to Bytebase: the ones the downstream client declared to us. */
+  /** Capabilities to declare to Bytebase: the elicitation the downstream client declared. */
   clientCapabilities: () => ClientCapabilities;
   /** Forward an elicitation (confirmation form) from Bytebase to the downstream client. */
   onElicit?: (params: ElicitRequest["params"]) => Promise<ElicitResult>;
@@ -27,34 +30,46 @@ export interface UpstreamHooks {
   onToolListChanged?: () => void;
 }
 
+export interface OpenOptions {
+  /** Whether a browser sign-in may start. */
+  interactive: boolean;
+  /** Whether to wait for another holder of the sign-in's lock. */
+  waitForLock: boolean;
+}
+
 /**
- * One connection to a Bytebase instance's /mcp endpoint, opened lazily and
- * re-opened after it drops. Sign-in runs through {@link FileOAuthClientProvider}.
+ * One connection to a Bytebase instance's /mcp endpoint for one client
+ * application, opened under the sign-in's lock (docs/DESIGN.md, D7).
  */
 export class Upstream {
   private readonly endpoint: URL;
-  private readonly provider: FileOAuthClientProvider;
+  readonly provider: FileOAuthClientProvider;
   private client?: Client;
   private connecting?: Promise<Client>;
 
-  constructor(private readonly config: Config & { url: URL }, private readonly hooks: UpstreamHooks) {
+  constructor(
+    private readonly config: Config & { url: URL },
+    private readonly clientInfo: Implementation | undefined,
+    private readonly hooks: UpstreamHooks,
+  ) {
     this.endpoint = mcpEndpoint(config.url);
-    this.provider = new FileOAuthClientProvider(config.url, {
+    this.provider = new FileOAuthClientProvider(config.url, clientIdentity(clientInfo), {
       home: config.home,
       callbackPort: config.callbackPort,
       openBrowser: config.openBrowser,
     });
   }
 
-  get tokenFile(): string {
-    return this.provider.tokenFile;
+  /** The open session, if any. */
+  get session(): Client | undefined {
+    return this.client;
   }
 
-  /** Returns the connected client, signing in and connecting when needed. */
-  async get(): Promise<Client> {
+  /** Returns the session, opening it under the sign-in's lock when needed. */
+  async open(options: OpenOptions): Promise<Client> {
     if (this.client) return this.client;
     if (!this.connecting) {
-      this.connecting = this.connect().finally(() => {
+      this.connecting = this.openLocked(options).finally(() => {
         this.connecting = undefined;
       });
     }
@@ -68,105 +83,101 @@ export class Upstream {
     void client?.close().catch(() => undefined);
   }
 
-  /** Forgets the stored sign-in for this instance. */
-  signOut(): void {
-    this.reset();
-    this.provider.clear();
-  }
-
   async listTools(): Promise<ListToolsResult> {
-    return this.withRetry((client) => client.request({ method: "tools/list", params: {} }, ListToolsResultSchema));
+    const client = await this.open({ interactive: false, waitForLock: true });
+    return client.request({ method: "tools/list", params: {} }, ListToolsResultSchema);
   }
 
-  async callTool(params: CallToolRequest["params"]): Promise<CallToolResult> {
-    // Raw request rather than client.callTool(): the latter validates
-    // structuredContent against a tool list it may not have fetched, and this
-    // package passes results through untouched.
-    return this.withRetry((client) => client.request({ method: "tools/call", params }, CallToolResultSchema));
-  }
-
-  /** Runs fn once; if the session dropped underneath it, reconnects and runs it once more. */
-  private async withRetry<T>(fn: (client: Client) => Promise<T>): Promise<T> {
-    const client = await this.get();
+  /**
+   * Forwards a tool call. It follows the client: a call cancelled before its
+   * session opens is never sent, and it is resent only after an error showing
+   * the instance never received it.
+   */
+  async callTool(params: CallToolRequest["params"], signal?: AbortSignal): Promise<CallToolResult> {
+    const send = async () => {
+      const client = await this.open({ interactive: true, waitForLock: true });
+      signal?.throwIfAborted();
+      // Raw request rather than client.callTool(): that validates structuredContent
+      // against a tool list it may not have, and results pass through untouched.
+      return client.request({ method: "tools/call", params }, CallToolResultSchema, { signal, timeout: NO_TIMEOUT_MS });
+    };
     try {
-      return await fn(client);
+      return await send();
     } catch (err) {
-      if (!isConnectionLoss(err)) throw err;
-      log(`connection to ${this.endpoint} dropped (${describe(err)}); reconnecting`);
+      if (signal?.aborted || !neverReceived(err)) throw err;
+      log(`the instance did not receive the call (${describe(err)}); reconnecting`);
       this.reset();
-      return fn(await this.get());
+      return send();
     }
   }
 
-  private async connect(): Promise<Client> {
+  private async openLocked(options: OpenOptions): Promise<Client> {
+    const held = await this.provider.withLock(() => this.connect(options.interactive), { wait: options.waitForLock });
+    if (!held) throw new SignInRequiredError("another process holds this sign-in");
+    return held.value;
+  }
+
+  private async connect(interactive: boolean): Promise<Client> {
     const capabilities = this.hooks.clientCapabilities();
     const forwardsElicitation = Boolean(capabilities.elicitation) && Boolean(this.hooks.onElicit);
-
-    for (let attempt = 1; ; attempt++) {
-      const transport = new StreamableHTTPClientTransport(this.endpoint, { authProvider: this.provider });
-      const client = new Client(
-        { name: "bytebase-mcp", title: "Bytebase MCP (npm)", version: PACKAGE_VERSION },
-        {
-          capabilities: {
-            ...(forwardsElicitation ? { elicitation: capabilities.elicitation } : {}),
-          },
-        },
-      );
-      if (forwardsElicitation) {
-        client.setRequestHandler(ElicitRequestSchema, async (request) => this.hooks.onElicit!(request.params));
-      }
-      client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
-        this.hooks.onToolListChanged?.();
-      });
-      client.onclose = () => {
-        if (this.client === client) this.client = undefined;
-      };
-      client.onerror = (err) => {
-        // Closing a session aborts its SSE stream; that is not an error worth a line.
-        if (/AbortError|operation was aborted/.test(describe(err))) return;
-        log(`upstream error: ${describe(err)}`);
-      };
-
-      try {
-        await client.connect(transport);
-        this.client = client;
-        return client;
-      } catch (err) {
-        if (err instanceof UnauthorizedError && attempt === 1) {
-          const code = await this.provider.waitForAuthorizationCode();
-          await transport.finishAuth(code);
-          log("signed in; connecting");
-          continue;
+    this.provider.interactive = interactive;
+    try {
+      for (let attempt = 1; ; attempt++) {
+        const transport = new StreamableHTTPClientTransport(this.endpoint, { authProvider: this.provider, fetch: this.provider.fetch });
+        const client = new Client(this.clientInfo ?? { name: "bytebase-mcp", version: "0" }, {
+          capabilities: forwardsElicitation ? { elicitation: capabilities.elicitation } : {},
+        });
+        if (forwardsElicitation) {
+          client.setRequestHandler(ElicitRequestSchema, async (request) => this.hooks.onElicit!(request.params));
         }
-        throw new Error(`cannot connect to ${this.endpoint}: ${describe(err)}${hint(err)}`, { cause: err });
+        client.setNotificationHandler(ToolListChangedNotificationSchema, () => this.hooks.onToolListChanged?.());
+        client.onclose = () => {
+          if (this.client === client) this.client = undefined;
+        };
+        client.onerror = (err) => {
+          if (/AbortError|operation was aborted/.test(describe(err))) return;
+          log(`upstream error: ${describe(err)}`);
+        };
+        try {
+          await client.connect(transport);
+          this.client = client;
+          return client;
+        } catch (err) {
+          if (findSignInRequired(err)) throw findSignInRequired(err);
+          if (err instanceof UnauthorizedError && interactive && attempt === 1) {
+            const code = await this.provider.waitForAuthorizationCode();
+            await transport.finishAuth(code);
+            log("signed in; connecting");
+            continue;
+          }
+          throw new Error(`cannot connect to ${this.endpoint}: ${describe(err)}${hint(err)}`, { cause: err });
+        }
       }
+    } finally {
+      this.provider.interactive = false;
     }
   }
 }
 
-function isConnectionLoss(err: unknown): boolean {
-  const text = describe(err).toLowerCase();
-  return (
-    text.includes("not connected") ||
-    text.includes("session not found") ||
-    text.includes("econnreset") ||
-    text.includes("econnrefused") ||
-    text.includes("fetch failed") ||
-    text.includes("terminated") ||
-    text.includes("http 404") ||
-    text.includes("http 401")
-  );
+function findSignInRequired(err: unknown): SignInRequiredError | undefined {
+  for (let e: unknown = err; e; e = (e as { cause?: unknown }).cause) {
+    if (e instanceof SignInRequiredError) return e;
+  }
+  return undefined;
 }
 
-/** A next step for the errors users hit most. */
+/** Errors that show the instance never received the request. */
+function neverReceived(err: unknown): boolean {
+  const text = describe(err).toLowerCase();
+  return text.includes("econnrefused") || text.includes("session not found") || text.includes("http 404") || text.includes("http 401") || text.includes("not connected");
+}
+
 function hint(err: unknown): string {
   const text = describe(err);
   if (/Protected resource .* does not match/i.test(text)) {
     return ". BYTEBASE_URL must be the instance's external URL (Settings > General > External URL), because Bytebase binds MCP tokens to it";
   }
-  if (/sign-in timed out/i.test(text)) {
-    return ". Run `bytebase-mcp login` to sign in again";
-  }
+  if (/sign-in timed out/i.test(text)) return ". Call a tool again to restart the sign-in";
   return "";
 }
 

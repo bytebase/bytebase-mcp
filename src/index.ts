@@ -2,22 +2,24 @@
 import { loadConfig } from "./config.js";
 import { log } from "./log.js";
 import { serveStdio } from "./server.js";
-import { Upstream, describe } from "./upstream.js";
+import { describe } from "./upstream.js";
+import { instanceDir } from "./auth.js";
+import { catalogUrl, fetchCatalog } from "./catalog.js";
+import fs from "node:fs";
 import { PACKAGE_VERSION } from "./version.js";
 
 const HELP = `bytebase-mcp ${PACKAGE_VERSION}
 
-MCP server for Bytebase. Forwards tool calls to your Bytebase instance over its OAuth-protected /mcp endpoint.
+MCP server for Bytebase. Reads the tool list from your Bytebase instance and forwards tool calls to its OAuth-protected /mcp endpoint.
 
 Usage:
-  bytebase-mcp [--url <bytebase-url>]   Serve MCP over stdio (default)
-  bytebase-mcp login [--url <url>]      Sign in to the instance now and store the token
-  bytebase-mcp logout [--url <url>]     Forget the stored sign-in for the instance
-  bytebase-mcp whoami [--url <url>]     Show the instance, token file and tool count
+  bytebase-mcp [--url <bytebase-url>]   Serve MCP over stdio (default); the first tool call signs in
+  bytebase-mcp logout [--url <url>]     Forget every sign-in stored for the instance
+  bytebase-mcp status [--url <url>]     Show the instance, its tool list and the stored sign-ins
 
 Environment:
   BYTEBASE_URL                 External URL of the Bytebase instance (required to call tools)
-  BYTEBASE_MCP_HOME            Token directory (default ~/.config/bytebase-mcp)
+  BYTEBASE_MCP_HOME            Sign-in directory (default ~/.config/bytebase-mcp)
   BYTEBASE_MCP_CALLBACK_PORT   Loopback port for the OAuth redirect (default 51789)
   BYTEBASE_MCP_NO_BROWSER=1    Print the sign-in URL instead of opening a browser
 
@@ -68,37 +70,27 @@ async function main(): Promise<void> {
   if (!config.url) {
     throw new Error(`${command} needs a Bytebase URL: pass --url or set BYTEBASE_URL`);
   }
-  const upstream = new Upstream({ ...config, url: config.url }, { clientCapabilities: () => ({}) });
-
+  const dir = instanceDir(config.home, config.url);
   switch (command) {
-    case "login": {
-      const client = await upstream.get();
-      const info = client.getServerVersion();
-      log(`signed in to ${config.url} (Bytebase ${info?.version ?? "unknown"}); token stored at ${upstream.tokenFile}`);
-      upstream.reset();
-      return;
-    }
     case "logout":
-      upstream.signOut();
-      log(`removed ${upstream.tokenFile}`);
+      fs.rmSync(dir, { recursive: true, force: true });
+      log(`removed the sign-ins for ${config.url.toString().replace(/\/$/, "")} (${dir})`);
       return;
-    case "whoami": {
-      const client = await upstream.get();
-      const info = client.getServerVersion();
-      const tools = await upstream.listTools();
+    case "status": {
+      const probe = await fetchCatalog(catalogUrl(config.url), AbortSignal.timeout(5000));
+      const signIns = fs.existsSync(dir) ? fs.readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -".json".length)) : [];
       process.stdout.write(
         `${JSON.stringify(
           {
             url: config.url.toString(),
-            bytebaseVersion: info?.version,
-            tokenFile: upstream.tokenFile,
-            tools: tools.tools.map((t) => t.name),
+            catalog: probe.kind === "catalog" ? { tools: probe.catalog.tools.map((tool) => tool.name) } : { unavailable: probe.detail },
+            signIns,
+            signInDirectory: dir,
           },
           null,
           2,
         )}\n`,
       );
-      upstream.reset();
       return;
     }
     default:

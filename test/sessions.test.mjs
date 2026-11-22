@@ -1,0 +1,197 @@
+// Sessions, sign-in and the token lock (docs/DESIGN.md D5–D7, D9, S3, S4),
+// driven over stdio against a fake Bytebase. The test plays the browser by
+// following the sign-in URL the proxy prints.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import { completeSignIn, startFakeBytebase, SESSION_INSTRUCTIONS } from "./fake-upstream.mjs";
+
+const entry = path.join(import.meta.dirname, "..", "dist", "index.js");
+let nextPort = 52100 + Math.floor(Math.random() * 500);
+
+function freshHome() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "bytebase-mcp-test-"));
+}
+
+/** Starts a proxy as `clientName` and collects the sign-in URLs it prints. */
+async function connect({ url, home, port, clientName = "sessions-client", title }) {
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [entry],
+    env: {
+      ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("BYTEBASE_"))),
+      BYTEBASE_URL: url,
+      BYTEBASE_MCP_HOME: home,
+      BYTEBASE_MCP_CALLBACK_PORT: String(port),
+      BYTEBASE_MCP_NO_BROWSER: "1",
+    },
+    stderr: "pipe",
+  });
+  const signIns = [];
+  const waiters = [];
+  const client = new Client({ name: clientName, title, version: "1.2.3" }, { capabilities: {} });
+  const started = client.connect(transport);
+  transport.stderr.setEncoding("utf8");
+  transport.stderr.on("data", (text) => {
+    for (const match of text.matchAll(/https?:\/\/\S+\/authorize\?\S+/g)) {
+      const waiter = waiters.shift();
+      if (waiter) waiter(match[0]);
+      else signIns.push(match[0]);
+    }
+  });
+  await started;
+  return {
+    client,
+    signIns,
+    /** Resolves with the next sign-in URL the proxy prints. */
+    nextSignIn: () => (signIns.length > 0 ? Promise.resolve(signIns.shift()) : new Promise((resolve) => waiters.push(resolve))),
+  };
+}
+
+test("D5/D6: the first tool call signs in as the real client, then runs", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const proxy = await connect({ url: bytebase.url, home: freshHome(), port: nextPort++, title: "Sessions Client" });
+  t.after(() => proxy.client.close());
+
+  const call = proxy.client.callTool({ name: "query_database", arguments: {} });
+  await completeSignIn(await proxy.nextSignIn());
+  const result = await call;
+  assert.equal(result.content[0].text, "ran query_database");
+
+  assert.deepEqual(
+    bytebase.registrations.map((r) => r.client_name),
+    ["Sessions Client via Bytebase MCP"],
+  );
+  assert.equal(bytebase.initializes.at(-1).clientInfo.name, "sessions-client", "the client's own clientInfo reaches the instance");
+});
+
+/** Signs one proxy in and closes it, leaving a stored sign-in for the client in `home`. */
+async function signInOnce(bytebase, home, port) {
+  const proxy = await connect({ url: bytebase.url, home, port });
+  const call = proxy.client.callTool({ name: "get_schema", arguments: {} });
+  await completeSignIn(await proxy.nextSignIn());
+  await call;
+  await proxy.client.close();
+}
+
+test("S3: a stored sign-in opens the session at initialize and passes its instructions through", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+
+  const proxy = await connect({ url: bytebase.url, home, port });
+  t.after(() => proxy.client.close());
+  assert.equal(proxy.client.getInstructions(), SESSION_INSTRUCTIONS, "the instance's own text, account line included");
+  const result = await proxy.client.callTool({ name: "query_database", arguments: {} });
+  assert.equal(result.content[0].text, "ran query_database");
+  assert.equal(bytebase.registrations.length, 1, "the stored registration is reused");
+  assert.equal(proxy.signIns.length, 0);
+});
+
+test("D7: two processes refreshing at once send one refresh", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+
+  const first = await connect({ url: bytebase.url, home, port });
+  const second = await connect({ url: bytebase.url, home, port });
+  t.after(() => Promise.all([first.client.close(), second.client.close()]));
+  bytebase.expireAccessTokens();
+  const results = await Promise.all([
+    first.client.callTool({ name: "query_database", arguments: {} }),
+    second.client.callTool({ name: "query_database", arguments: {} }),
+  ]);
+  assert.deepEqual(
+    results.map((r) => r.content[0].text),
+    ["ran query_database", "ran query_database"],
+  );
+  assert.equal(bytebase.refreshes, 1, "the second process used the tokens the first one saved");
+});
+
+test("D7: two processes signing in for the first time register once and sign in once", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  const first = await connect({ url: bytebase.url, home, port });
+  const second = await connect({ url: bytebase.url, home, port });
+  t.after(() => Promise.all([first.client.close(), second.client.close()]));
+
+  const calls = [first, second].map((proxy) => proxy.client.callTool({ name: "query_database", arguments: {} }));
+  const url = await Promise.race([first.nextSignIn(), second.nextSignIn()]);
+  await completeSignIn(url);
+  const results = await Promise.all(calls);
+  assert.deepEqual(
+    results.map((r) => r.content[0].text),
+    ["ran query_database", "ran query_database"],
+  );
+  assert.equal(bytebase.registrations.length, 1);
+  assert.equal(first.signIns.length + second.signIns.length, 0, "no sign-in URL was printed besides the one used");
+});
+
+test("S4: an instance without the catalog signs in after initialize and announces its tools", async (t) => {
+  const bytebase = await startFakeBytebase({ catalog: "html" });
+  t.after(() => bytebase.close());
+  const proxy = await connect({ url: bytebase.url, home: freshHome(), port: nextPort++ });
+  t.after(() => proxy.client.close());
+  assert.deepEqual((await proxy.client.listTools()).tools, []);
+
+  const announced = new Promise((resolve) => proxy.client.setNotificationHandler(ToolListChangedNotificationSchema, resolve));
+  await completeSignIn(await proxy.nextSignIn());
+  await announced;
+  assert.deepEqual(
+    (await proxy.client.listTools()).tools.map((tool) => tool.name),
+    ["query_database", "get_schema"],
+  );
+});
+
+test("D5: a call cancelled while sign-in is pending is never sent", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const proxy = await connect({ url: bytebase.url, home: freshHome(), port: nextPort++ });
+  t.after(() => proxy.client.close());
+
+  const cancel = new AbortController();
+  const call = proxy.client.callTool({ name: "query_database", arguments: {} }, undefined, { signal: cancel.signal });
+  const url = await proxy.nextSignIn();
+  cancel.abort();
+  await assert.rejects(call);
+  await completeSignIn(url);
+  const later = await proxy.client.callTool({ name: "get_schema", arguments: {} });
+  assert.equal(later.content[0].text, "ran get_schema");
+  assert.deepEqual(
+    bytebase.toolCalls.map((c) => c.name),
+    ["get_schema"],
+    "the cancelled query_database never reached the instance",
+  );
+});
+
+test("D9: status shows the stored sign-ins without signing in, and logout forgets them", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  await signInOnce(bytebase, home, nextPort++);
+  const run = async (command) => {
+    const { execFile } = await import("node:child_process");
+    return new Promise((resolve, reject) =>
+      execFile(process.execPath, [entry, command, "--url", bytebase.url], { env: { ...process.env, BYTEBASE_MCP_HOME: home } }, (err, stdout) =>
+        err ? reject(err) : resolve(stdout),
+      ),
+    );
+  };
+  const status = JSON.parse(await run("status"));
+  assert.deepEqual(status.signIns, ["sessions-client"]);
+  assert.deepEqual(status.catalog.tools, ["query_database", "get_schema"]);
+  await run("logout");
+  assert.deepEqual(JSON.parse(await run("status")).signIns, []);
+});
