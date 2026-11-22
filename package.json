@@ -2,7 +2,7 @@
   "name": "@bytebase/bytebase-mcp",
   "version": "0.1.0",
   "mcpName": "io.github.bytebase/bytebase-mcp",
-  "description": "Official MCP server package for Bytebase. Ships the tool definitions of Bytebase's built-in MCP server and forwards every call to your Bytebase instance over its OAuth-protected /mcp endpoint.",
+  "description": "Official MCP server package for Bytebase. Reads the tool list from your Bytebase instance and forwards every call to its OAuth-protected /mcp endpoint.",
   "repository": {
     "type": "git",
     "url": "https://github.com/bytebase/bytebase-mcp.git"
@@ -26,12 +26,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc && node scripts/copy-assets.mjs",
+    "build": "tsc && node scripts/mark-executable.mjs",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/config.test.mjs test/smoke.test.mjs",
-    "sync-tools": "node scripts/sync-tools.mjs",
-    "render-readme": "node scripts/render-readme.mjs",
     "sync-version": "node scripts/sync-version.mjs",
     "version": "npm run sync-version && git add server.json",
     "prepublishOnly": "npm run build && npm test"

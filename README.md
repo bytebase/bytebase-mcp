@@ -2,15 +2,15 @@
 
 [![npm](https://img.shields.io/npm/v/@bytebase/bytebase-mcp)](https://www.npmjs.com/package/@bytebase/bytebase-mcp)
 
-The official npm package for the [Bytebase](https://www.bytebase.com) MCP server. It lets AI assistants that run MCP servers as local commands (Claude Desktop, Cursor, Windsurf, and others) use the MCP server built into your Bytebase instance: query data, inspect schemas, and propose database changes, all under Bytebase's approvals, access control, data masking, and audit logging.
+The official npm package for the [Bytebase](https://www.bytebase.com) MCP server. It lets AI assistants that can only run MCP servers as local commands use the MCP server built into your Bytebase instance: query data, inspect schemas, and propose database changes, all under Bytebase's approvals, access control, data masking, and audit logging.
 
 ```
   AI assistant  --stdio-->  bytebase-mcp  --HTTPS + OAuth-->  <your Bytebase>/mcp  -->  your databases
 ```
 
-The package contains no database logic of its own. It ships the tool definitions of Bytebase's built-in MCP server and forwards every call to your instance, where permissions, the workspace MCP access policy, approvals and audit apply exactly as in the console. Nothing is cached or executed locally except the OAuth token.
+The package contains no Bytebase logic and no copy of Bytebase's tools. It reads the tool list from your instance's public catalog (`<your Bytebase URL>/mcp/catalog`) and forwards every call to the instance, where permissions, the workspace MCP access policy, approvals and audit apply exactly as in the console. Nothing is stored locally except the OAuth token.
 
-> If your client supports remote MCP servers over HTTP (Claude Code, Codex, Copilot CLI, Gemini CLI, VS Code, Claude Desktop connectors), you do not need this package: point the client straight at `<your Bytebase URL>/mcp`. See the [MCP integration docs](https://docs.bytebase.com/integrations/mcp).
+> Most clients, including Claude Code, Claude Desktop, Cursor, Codex, Copilot CLI, Gemini CLI and VS Code, connect to remote MCP servers over HTTP. They do not need this package: point them straight at `<your Bytebase URL>/mcp`. See the [MCP integration docs](https://docs.bytebase.com/integrations/mcp). This package is for clients that only start local commands, and for MCP directories.
 
 ## Requirements
 
@@ -64,38 +64,21 @@ Every command takes `--url <bytebase-url>` in place of `BYTEBASE_URL`.
 | `BYTEBASE_MCP_HOME` | `~/.config/bytebase-mcp` | Where token files live, one per instance host |
 | `BYTEBASE_MCP_CALLBACK_PORT` | `51789` | Loopback port that receives the OAuth redirect |
 | `BYTEBASE_MCP_NO_BROWSER` | unset | Set to `1` to print the sign-in URL instead of opening a browser |
+| `BYTEBASE_MCP_PUBLIC_CATALOG_URL` | Bytebase Cloud's | The catalog listed when `BYTEBASE_URL` is unset; for tests |
 
 ## Tools
 
-The tools are Bytebase's. The list below is generated from the release named in `src/tools.json`; a connected instance's live list replaces it, so an older or newer Bytebase shows its own tools.
-
-<!-- tools:start -->
-Generated from Bytebase 3.24.1.
-
-| Tool | Purpose |
-| --- | --- |
-| `call_api` | Execute a Bytebase API endpoint. |
-| `decide_issue` | Approve or reject a Bytebase issue at its current approval step. |
-| `get_schema` | Inspect a Bytebase database's schema. |
-| `get_skill` | Get step-by-step guides for Bytebase tasks. |
-| `grant_masking_exemption` | Exempt one member from data masking in a Bytebase project, for one database (optionally one schema, table or column) or for every database in the project. |
-| `propose_database_change` | Run DDL/DML changes (ALTER TABLE, CREATE TABLE, INSERT, UPDATE, migrations) against a Bytebase database. |
-| `query_database` | Execute a SQL query against a Bytebase database. |
-| `reauthorize` | Log out the current MCP OAuth connection so the client can run OAuth again. |
-| `revoke_masking_exemption` | Remove one member's masking exemption in a Bytebase project. |
-| `search_api` | Discover Bytebase API endpoints. |
-| `set_just_in_time_access` | Turn just-in-time access on or off for one Bytebase project. |
-<!-- tools:end -->
+The tools are Bytebase's, read from your instance at startup, so you always see the ones your Bytebase release has. See the [MCP integration docs](https://docs.bytebase.com/integrations/mcp) for what each does.
 
 What each session may do is set on the instance: the signed-in user's permissions, narrowed by the workspace [MCP access policy](https://docs.bytebase.com/integrations/mcp#access-policy) (Disabled, Read-only, Read-write). Actions that need confirmation (approving an issue, granting a masking exemption) show a confirmation form in clients that support MCP elicitation; the package forwards the form to your client.
 
 ## How it works
 
-1. On start, the server answers `initialize` and `tools/list` from the bundled definitions, so your client has the tool list at once, and so MCP directories can read it without an instance.
-2. On the first `tools/call` (or in the background after `tools/list` when `BYTEBASE_URL` is set), it connects to `<BYTEBASE_URL>/mcp` over Streamable HTTP. If there is no valid token it runs the OAuth authorization-code flow with PKCE: discovery through `/.well-known/oauth-protected-resource/mcp`, dynamic client registration, browser sign-in, loopback redirect.
-3. Tool calls, results and elicitation requests pass through unchanged. If the live tool list differs from the bundle, the server sends `tools/list_changed`.
+1. On start, the server reads `<BYTEBASE_URL>/mcp/catalog`, the tool list and instructions every Bytebase instance serves without sign-in, and answers `initialize` and `tools/list` from it. With no `BYTEBASE_URL` it reads Bytebase Cloud's catalog instead, so MCP directories can list the tools, and every tool call says to set `BYTEBASE_URL`.
+2. On the first `tools/call`, it connects to `<BYTEBASE_URL>/mcp` over Streamable HTTP. With no valid token it runs the OAuth authorization-code flow with PKCE: discovery through `/.well-known/oauth-protected-resource/mcp`, dynamic client registration, browser sign-in, loopback redirect.
+3. Tool calls, results and confirmation forms pass through unchanged. Once a session is open, the tool list comes from it.
 
-Bytebase's refresh tokens are single-use and MCP clients start one process per session, so the token file is re-read before each refresh and written atomically.
+An instance older than the catalog route lists its tools only after you sign in. The design, with every state the server can be in, is in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Development
 
@@ -104,19 +87,8 @@ Design notes for reviewers and maintainers: [docs/DESIGN.md](docs/DESIGN.md).
 ```bash
 npm install
 npm run build
-npm test                 # unit + cold-start smoke tests, no instance needed
+npm test                 # tests against a fake Bytebase; no instance needed
 ```
-
-### Keeping the tool definitions in sync
-
-`src/tools.json` is generated, never edited. Before each release, dump the tool list from an instance running the Bytebase version you want to ship with:
-
-```bash
-npm run build
-BYTEBASE_URL=https://your-bytebase npm run sync-tools
-```
-
-The script signs in like the package does and prints what changed. Commit the result with the version bump.
 
 ### Releasing
 
