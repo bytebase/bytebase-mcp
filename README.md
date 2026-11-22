@@ -36,23 +36,15 @@ Add the server to your MCP client with your instance's external URL:
 }
 ```
 
-The first tool call opens your browser on Bytebase's authorization page. Sign in, review what the session may do, and click **Allow**. The token is stored under `~/.config/bytebase-mcp/` with owner-only permissions and refreshed automatically.
-
-To sign in ahead of time, or on a machine without a browser:
-
-```bash
-BYTEBASE_URL=https://bytebase.example.com npx -y @bytebase/bytebase-mcp login
-BYTEBASE_MCP_NO_BROWSER=1 BYTEBASE_URL=https://bytebase.example.com npx -y @bytebase/bytebase-mcp login   # prints the URL instead
-```
+The first tool call opens your browser on Bytebase's authorization page. Sign in, review what the session may do, and click **Allow**. Bytebase shows your AI client by name there, and each client application signs in once per instance. The token is stored under `~/.config/bytebase-mcp/` with owner-only permissions and refreshed automatically; several sessions share it safely. Set `BYTEBASE_MCP_NO_BROWSER=1` to print the sign-in URL instead of opening a browser.
 
 ### Commands
 
 | Command | What it does |
 | --- | --- |
 | `bytebase-mcp` | Serve MCP over stdio (what your client runs) |
-| `bytebase-mcp login` | Sign in now and store the token |
-| `bytebase-mcp logout` | Forget the stored sign-in |
-| `bytebase-mcp whoami` | Show the instance, token file, and the live tool list |
+| `bytebase-mcp status` | Show the instance, its tool list and the stored sign-ins, without signing in |
+| `bytebase-mcp logout` | Forget every sign-in stored for the instance |
 
 Every command takes `--url <bytebase-url>` in place of `BYTEBASE_URL`.
 

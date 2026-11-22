@@ -19,6 +19,7 @@ async function connect(env, { form = false } = {}) {
       ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("BYTEBASE_"))),
       BYTEBASE_MCP_HOME: path.join(import.meta.dirname, ".tmp-home"),
       BYTEBASE_MCP_NO_BROWSER: "1",
+      BYTEBASE_MCP_CALLBACK_PORT: String(52700 + Math.floor(Math.random() * 500)),
       ...env,
     },
     stderr: "pipe",

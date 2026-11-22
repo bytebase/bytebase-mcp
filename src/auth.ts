@@ -1,58 +1,95 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
-import type {
-  OAuthClientInformationMixed,
-  OAuthClientMetadata,
-  OAuthTokens,
-} from "@modelcontextprotocol/sdk/shared/auth.js";
+import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import type { Implementation } from "@modelcontextprotocol/sdk/types.js";
+import { FileLock } from "./lock.js";
 import { log } from "./log.js";
 
 interface StoredState {
   clientInformation?: OAuthClientInformationMixed;
   tokens?: OAuthTokens;
-  codeVerifier?: string;
+}
+
+/** Bytebase rejects a longer client_name (backend/api/oauth2/register.go). */
+const MAX_CLIENT_NAME = 200;
+
+/** The client application a sign-in belongs to (docs/DESIGN.md, D6). */
+export interface ClientIdentity {
+  /** File name for its sign-in. */
+  key: string;
+  /** What Bytebase shows on the consent page. */
+  clientName: string;
+}
+
+export function clientIdentity(info: Implementation | undefined): ClientIdentity {
+  const name = info?.name?.trim() || "unknown-client";
+  const label = info?.title?.trim() || name;
+  return {
+    key: name.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 100),
+    clientName: `${label} via Bytebase MCP`.slice(0, MAX_CLIENT_NAME),
+  };
+}
+
+/** Directory holding an instance's sign-ins: host, port and path, so instances under different paths do not collide. */
+export function instanceDir(home: string, instanceUrl: URL): string {
+  const key = `${instanceUrl.hostname}${instanceUrl.port ? `_${instanceUrl.port}` : ""}${instanceUrl.pathname.replace(/\/+$/, "")}`;
+  return path.join(home, key.replace(/[^A-Za-z0-9._-]/g, "_"));
+}
+
+/** A sign-in was needed where the proxy may not start one (docs/DESIGN.md, D7). */
+export class SignInRequiredError extends Error {
+  constructor(message = "sign-in needed") {
+    super(message);
+    this.name = "SignInRequiredError";
+  }
 }
 
 export interface FileOAuthClientProviderOptions {
-  /** Directory that holds one token file per instance host. */
   home: string;
-  /** Loopback port the authorization redirect comes back on. */
   callbackPort: number;
-  /** Open the authorization URL in the default browser. The URL is printed to stderr either way. */
   openBrowser: boolean;
-  /** How long to wait for the user to finish signing in. */
   signInTimeoutMs?: number;
 }
 
 /**
- * Keeps the OAuth client registration, tokens and PKCE verifier for one
- * Bytebase instance in a 0600 file under `home`, and runs the browser leg of
- * the authorization-code flow on a loopback listener.
- *
- * The MCP SDK drives the rest: discovery through the instance's
- * `/.well-known/oauth-protected-resource/mcp`, dynamic client registration,
- * PKCE, token exchange and refresh.
+ * Marks work done while this async chain holds a sign-in's lock, so it does not
+ * wait on itself. Work the holder starts can outlive it (the SDK's event stream
+ * does), so the mark counts only while `active` is true.
+ */
+const lockHeld = new AsyncLocalStorage<{ file: string; active: boolean }>();
+
+/**
+ * Keeps one client application's sign-in to one Bytebase instance in a 0600
+ * file, under the rules of docs/DESIGN.md D7: the file is written only while
+ * holding its lock; signing in and refreshing each run under it; the PKCE
+ * verifier stays in memory; a refused credential is deleted only if the file
+ * still holds what this process sent.
  */
 export class FileOAuthClientProvider implements OAuthClientProvider {
-  private readonly file: string;
+  readonly file: string;
+  private readonly lock: FileLock;
   private readonly options: Required<FileOAuthClientProviderOptions>;
-  private state_: StoredState;
+  private readonly identity: ClientIdentity;
+  private verifier?: string;
   private pendingState?: string;
   private pendingCode?: Promise<string>;
+  private lastSentRefreshToken?: string;
+  /** The access token the instance last refused, to tell newer tokens on disk from the rejected ones. */
+  private lastRejectedAccessToken?: string;
+  /** Whether a sign-in may start now: only while a session is being opened for a tool call or S4. */
+  interactive = false;
 
-  constructor(instanceUrl: URL, options: FileOAuthClientProviderOptions) {
+  constructor(instanceUrl: URL, identity: ClientIdentity, options: FileOAuthClientProviderOptions) {
     this.options = { signInTimeoutMs: 5 * 60 * 1000, ...options };
-    const hostKey = `${instanceUrl.hostname}${instanceUrl.port ? `_${instanceUrl.port}` : ""}`.replace(/[^A-Za-z0-9._-]/g, "_");
-    this.file = path.join(options.home, `${hostKey}.json`);
-    this.state_ = this.read();
-  }
-
-  get tokenFile(): string {
-    return this.file;
+    this.identity = identity;
+    this.file = path.join(instanceDir(options.home, instanceUrl), `${identity.key}.json`);
+    this.lock = new FileLock(this.file);
   }
 
   get redirectUrl(): string {
@@ -61,7 +98,7 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
 
   get clientMetadata(): OAuthClientMetadata {
     return {
-      client_name: "Bytebase MCP (npm)",
+      client_name: this.identity.clientName,
       client_uri: "https://github.com/bytebase/bytebase-mcp",
       redirect_uris: [this.redirectUrl],
       grant_types: ["authorization_code", "refresh_token"],
@@ -70,92 +107,146 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
     };
   }
 
+  /** Whether the file holds tokens, without opening anything. */
+  hasStoredSignIn(): boolean {
+    return Boolean(this.read().tokens);
+  }
+
+  /**
+   * Runs fn while holding the sign-in's lock. With `wait: false` it returns
+   * undefined at once when another holder has the lock.
+   */
+  async withLock<T>(fn: () => Promise<T>, { wait }: { wait: boolean }): Promise<{ value: T } | undefined> {
+    const held = lockHeld.getStore();
+    if (held?.active && held.file === this.file) return { value: await fn() };
+    const release = await this.lock.acquire({ wait });
+    if (!release) return undefined;
+    const mark = { file: this.file, active: true };
+    try {
+      return { value: await lockHeld.run(mark, fn) };
+    } finally {
+      mark.active = false;
+      release();
+    }
+  }
+
   state(): string {
     this.pendingState = randomBytes(16).toString("hex");
     return this.pendingState;
   }
 
   clientInformation(): OAuthClientInformationMixed | undefined {
-    return this.state_.clientInformation;
+    return this.read().clientInformation;
   }
 
-  saveClientInformation(clientInformation: OAuthClientInformationMixed): void {
-    this.state_.clientInformation = clientInformation;
-    this.write();
+  async saveClientInformation(clientInformation: OAuthClientInformationMixed): Promise<void> {
+    await this.writeUnderLock((state) => {
+      state.clientInformation = clientInformation;
+    });
   }
 
   tokens(): OAuthTokens | undefined {
-    // Re-read: another bytebase-mcp process (MCP clients start one per session)
-    // may have refreshed the single-use refresh token since we last looked.
-    this.state_ = this.read();
-    return this.state_.tokens;
+    return this.read().tokens;
   }
 
-  saveTokens(tokens: OAuthTokens): void {
-    this.state_.tokens = tokens;
-    this.write();
+  async saveTokens(tokens: OAuthTokens): Promise<void> {
+    await this.writeUnderLock((state) => {
+      // The fetch wrapper already wrote a refresh's result; only the SDK's issuer stamp may be new.
+      if (state.tokens?.access_token === tokens.access_token) {
+        state.tokens = { ...state.tokens, ...tokens };
+        return;
+      }
+      state.tokens = tokens;
+    });
   }
 
   saveCodeVerifier(codeVerifier: string): void {
-    this.state_.codeVerifier = codeVerifier;
-    this.write();
+    this.verifier = codeVerifier;
   }
 
   codeVerifier(): string {
-    const verifier = this.state_.codeVerifier;
-    if (!verifier) {
-      throw new Error("No PKCE code verifier saved; restart the sign-in");
-    }
-    return verifier;
+    if (!this.verifier) throw new Error("No PKCE code verifier in this process; restart the sign-in");
+    return this.verifier;
   }
 
-  invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier" | "discovery"): void {
-    switch (scope) {
-      case "all":
-        this.state_ = {};
-        break;
-      case "client":
-        delete this.state_.clientInformation;
-        break;
-      case "tokens":
-        delete this.state_.tokens;
-        break;
-      case "verifier":
-        delete this.state_.codeVerifier;
-        break;
-      case "discovery":
-        break;
+  async invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier" | "discovery"): Promise<void> {
+    if (scope === "verifier") {
+      this.verifier = undefined;
+      return;
     }
-    this.write();
+    if (scope === "discovery") return;
+    const sent = this.lastSentRefreshToken;
+    await this.writeUnderLock((state) => {
+      // Another process may have replaced what this one sent; leave its credentials alone.
+      if (state.tokens && sent && state.tokens.refresh_token !== sent) return;
+      if (scope === "tokens" || scope === "all") delete state.tokens;
+      if (scope === "client" || scope === "all") delete state.clientInformation;
+    });
   }
 
-  /** Forgets everything stored for this instance. */
-  clear(): void {
-    this.state_ = {};
-    if (fs.existsSync(this.file)) {
-      fs.unlinkSync(this.file);
-    }
+  /** Forgets this sign-in. */
+  async clear(): Promise<void> {
+    await this.withLock(async () => fs.rmSync(this.file, { force: true }), { wait: true });
   }
 
   /**
-   * Called by the SDK when a sign-in is needed. Starts the loopback listener,
-   * then hands the URL to the browser. The SDK throws UnauthorizedError right
-   * after; the caller then awaits {@link waitForAuthorizationCode}.
+   * The fetch the SDK transport sends through. A refresh runs under the lock
+   * from the request until its result is on disk; the SDK built the request
+   * from tokens it read earlier, so a request whose refresh token is no longer
+   * on disk is answered with the tokens on disk instead of being sent.
+   */
+  readonly fetch: FetchLike = async (input, init) => {
+    const sent = refreshTokenIn(init);
+    if (!sent) {
+      const response = await fetch(input, init);
+      if (response.status === 401) this.lastRejectedAccessToken = bearerIn(init) ?? this.lastRejectedAccessToken;
+      return response;
+    }
+    this.lastSentRefreshToken = sent;
+    const held = await this.withLock(
+      async () => {
+        const onDisk = this.read().tokens;
+        const newerOnDisk =
+          onDisk?.refresh_token !== undefined &&
+          (onDisk.refresh_token !== sent || (this.lastRejectedAccessToken !== undefined && onDisk.access_token !== this.lastRejectedAccessToken));
+        if (onDisk && newerOnDisk) {
+          this.lastSentRefreshToken = onDisk.refresh_token;
+          const { issuer: _issuer, ...body } = onDisk as OAuthTokens & { issuer?: string };
+          return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        const response = await fetch(input, init);
+        if (response.ok) {
+          const tokens = (await response.clone().json()) as OAuthTokens;
+          this.write({ ...this.read(), tokens });
+        }
+        return response;
+      },
+      { wait: true },
+    );
+    return held!.value;
+  };
+
+  /**
+   * Called by the SDK when a sign-in is needed. Refused unless a session is
+   * being opened for a tool call or S4; otherwise starts the loopback listener,
+   * under the machine-wide lock on the callback port, and hands the URL to the
+   * browser.
    */
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
+    if (!this.interactive) throw new SignInRequiredError();
     const expectedState = this.pendingState;
-    this.pendingCode = this.listenForCode(expectedState);
+    const portLock = new FileLock(path.join(this.options.home, `callback-${this.options.callbackPort}`));
+    const release = await portLock.acquire({ wait: true });
+    const { listening, code } = this.listenForCode(expectedState);
+    this.pendingCode = code.finally(() => release?.());
+    // The URL is printed only once the callback can be received.
+    await listening;
     log(`Sign in to Bytebase to continue:\n  ${authorizationUrl.toString()}`);
-    if (this.options.openBrowser) {
-      openInBrowser(authorizationUrl.toString());
-    }
+    if (this.options.openBrowser) openInBrowser(authorizationUrl.toString());
   }
 
-  /** Resolves with the authorization code once the browser redirects back. */
   async waitForAuthorizationCode(): Promise<string> {
-    if (!this.pendingCode) {
-      throw new Error("No sign-in in progress");
-    }
+    if (!this.pendingCode) throw new Error("No sign-in in progress");
     try {
       return await this.pendingCode;
     } finally {
@@ -163,8 +254,25 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
     }
   }
 
-  private listenForCode(expectedState: string | undefined): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
+  private async writeUnderLock(change: (state: StoredState) => void): Promise<void> {
+    await this.withLock(
+      async () => {
+        const state = this.read();
+        change(state);
+        this.write(state);
+      },
+      { wait: true },
+    );
+  }
+
+  private listenForCode(expectedState: string | undefined): { listening: Promise<void>; code: Promise<string> } {
+    let onListening!: () => void;
+    let onListenFailed!: (err: Error) => void;
+    const listening = new Promise<void>((resolve, reject) => {
+      onListening = resolve;
+      onListenFailed = reject;
+    });
+    const code = new Promise<string>((resolve, reject) => {
       const server = http.createServer((req, res) => {
         const url = new URL(req.url ?? "/", `http://127.0.0.1:${this.options.callbackPort}`);
         if (url.pathname !== "/callback") {
@@ -176,7 +284,7 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
         const state = url.searchParams.get("state");
         if (error) {
           res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" }).end(page("Sign-in failed", `Bytebase answered: ${escapeHtml(error)}. You can close this tab.`));
-          finish(new Error(`authorization refused: ${error}${url.searchParams.get("error_description") ? ` (${url.searchParams.get("error_description")})` : ""}`));
+          finish(new Error(`authorization refused: ${error}`));
           return;
         }
         if (!code) {
@@ -191,31 +299,26 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(page("Signed in", "Bytebase MCP is connected. You can close this tab and return to your AI assistant."));
         finish(undefined, code);
       });
-
-      const timer = setTimeout(() => {
-        finish(new Error(`sign-in timed out after ${Math.round(this.options.signInTimeoutMs / 1000)}s`));
-      }, this.options.signInTimeoutMs);
-
+      const timer = setTimeout(() => finish(new Error(`sign-in timed out after ${Math.round(this.options.signInTimeoutMs / 1000)}s`)), this.options.signInTimeoutMs);
       let done = false;
       const finish = (err: Error | undefined, code?: string) => {
         if (done) return;
         done = true;
         clearTimeout(timer);
-        // Let the response flush before closing.
         setTimeout(() => server.close(), 100);
         if (err) reject(err);
         else resolve(code as string);
       };
-
       server.on("error", (err: NodeJS.ErrnoException) => {
-        if (err.code === "EADDRINUSE") {
-          finish(new Error(`port ${this.options.callbackPort} is in use; set BYTEBASE_MCP_CALLBACK_PORT to a free port (the redirect URL registered with Bytebase must match, so clear ~/.config/bytebase-mcp if you change it)`));
-        } else {
-          finish(err);
-        }
+        const failure = err.code === "EADDRINUSE" ? new Error(`port ${this.options.callbackPort} is in use; set BYTEBASE_MCP_CALLBACK_PORT to a free port and run \`bytebase-mcp logout\` so the new redirect URL is registered`) : err;
+        onListenFailed(failure);
+        finish(failure);
       });
-      server.listen(this.options.callbackPort, "127.0.0.1");
+      server.listen(this.options.callbackPort, "127.0.0.1", () => onListening());
     });
+    // A listen failure rejects both; the caller awaits `listening` first.
+    code.catch(() => undefined);
+    return { listening, code };
   }
 
   private read(): StoredState {
@@ -226,12 +329,24 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
     }
   }
 
-  private write(): void {
+  private write(state: StoredState): void {
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
-    const tmp = `${this.file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.state_, null, 2) + "\n", { mode: 0o600 });
+    const tmp = `${this.file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", { mode: 0o600 });
     fs.renameSync(tmp, this.file);
   }
+}
+
+function bearerIn(init: RequestInit | undefined): string | undefined {
+  const header = new Headers(init?.headers).get("authorization");
+  return header?.toLowerCase().startsWith("bearer ") ? header.slice("bearer ".length) : undefined;
+}
+
+function refreshTokenIn(init: RequestInit | undefined): string | undefined {
+  if (!init || (init.method ?? "GET").toUpperCase() !== "POST" || !init.body) return undefined;
+  const body = init.body instanceof URLSearchParams ? init.body : typeof init.body === "string" ? new URLSearchParams(init.body) : undefined;
+  if (!body || body.get("grant_type") !== "refresh_token") return undefined;
+  return body.get("refresh_token") ?? undefined;
 }
 
 function openInBrowser(url: string): void {
@@ -252,12 +367,10 @@ function openInBrowser(url: string): void {
   }
   try {
     const child = spawn(command, args, { stdio: "ignore", detached: true });
-    child.on("error", () => {
-      /* the URL is already printed; nothing else to do */
-    });
+    child.on("error", () => undefined);
     child.unref();
   } catch {
-    /* ignore: the URL is printed to stderr */
+    /* the URL is printed to stderr */
   }
 }
 

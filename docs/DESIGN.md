@@ -1,6 +1,6 @@
 # Design: a pure proxy for Bytebase's built-in MCP server
 
-Status: proposal · 2026-11-22 · Linear BYT-10055 · server companion:
+Status: implemented in this PR · 2026-11-22 · Linear BYT-10055 · server companion:
 [bytebase `docs/design/mcp-public-catalog.md`](https://github.com/bytebase/bytebase/blob/main/docs/design/mcp-public-catalog.md)
 
 This package lets MCP directories and local-command clients use the MCP server built into every

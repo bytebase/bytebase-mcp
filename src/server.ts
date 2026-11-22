@@ -29,7 +29,7 @@ const NO_INSTANCE_NOTE =
 const FORM_SENTENCE =
   "This client cannot show Bytebase's confirmation form, so before you run a statement that may write, show it to the user and ask them to confirm.";
 
-/** The state decided at startup (docs/DESIGN.md, States). Sessions (S3) come with sign-in. */
+/** The state decided at startup (docs/DESIGN.md, States); S3 is decided at initialize. */
 type Startup =
   | { state: "S1"; catalog?: Catalog }
   | { state: "S2"; catalog: Catalog }
@@ -90,7 +90,7 @@ function withFormSentence(text: string, form: boolean): string {
  * from a Bytebase server read in this process; with no instance configured it
  * reads Bytebase Cloud's public catalog and runs nothing.
  */
-export function createServer(config: Config): { server: Server; upstream?: Upstream } {
+export function createServer(config: Config): { server: Server; upstream: () => Upstream | undefined } {
   const server = new Server(
     { name: "bytebase", title: "Bytebase", version: PACKAGE_VERSION },
     { capabilities: { tools: { listChanged: true } } },
@@ -119,21 +119,35 @@ export function createServer(config: Config): { server: Server; upstream?: Upstr
     }
   }
 
+  // Created at initialize: a sign-in belongs to the client application (D6).
   let upstream: Upstream | undefined;
-  if (config.url) {
-    upstream = new Upstream(
-      { ...config, url: config.url },
-      {
-        clientCapabilities: () => server.getClientCapabilities() ?? {},
-        onElicit: (params) => server.elicitInput(params),
-        onToolListChanged: () => void refreshSessionTools(),
-      },
-    );
+  const upstreamFor = (url: URL): Upstream => {
+    upstream ??= new Upstream({ ...config, url }, server.getClientVersion(), {
+      clientCapabilities: () => server.getClientCapabilities() ?? {},
+      onElicit: (params) => server.elicitInput(params),
+      onToolListChanged: () => void refreshSessionTools(),
+    });
+    return upstream;
+  };
+
+  /**
+   * S3: opens a session inside initialize when a stored sign-in does it without
+   * waiting for the lock or asking the user, within what is left of the bound.
+   */
+  async function openWithStoredSignIn(deadline: number): Promise<string | undefined> {
+    if (!config.url) return undefined;
+    const target = upstreamFor(config.url);
+    if (!target.provider.hasStoredSignIn()) return undefined;
+    const opening = target.open({ interactive: false, waitForLock: false });
+    opening.catch((err) => log(`starting signed out: ${describe(err)}`));
+    const timeout = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())).unref());
+    const session = await Promise.race([opening.catch(() => undefined), timeout]);
+    return session ? (session.getInstructions() ?? "") : undefined;
   }
 
   /** Reads the open session's tool list, and tells the client when it differs from what it has. */
   async function refreshSessionTools(): Promise<void> {
-    if (!upstream) return;
+    if (!upstream?.session) return;
     try {
       const fresh = (await upstream.listTools()).tools;
       const changed = JSON.stringify(fresh) !== JSON.stringify(sessionTools ?? catalog?.tools ?? []);
@@ -148,12 +162,27 @@ export function createServer(config: Config): { server: Server; upstream?: Upstr
   // capabilities, with instructions for the state the proxy is in.
   const sdkInitialize = (server as unknown as { _oninitialize(request: InitializeRequest): Promise<InitializeResult> })._oninitialize.bind(server);
   server.setRequestHandler(InitializeRequestSchema, async (request) => {
+    const deadline = Date.now() + INITIALIZE_BOUND_MS;
     const result = await sdkInitialize(request);
-    const instructions = instructionsFor(await startup, config, request.params.capabilities);
-    return { ...result, instructions };
+    const fromSession = await openWithStoredSignIn(deadline);
+    if (fromSession !== undefined) {
+      void refreshSessionTools();
+      return { ...result, instructions: fromSession };
+    }
+    return { ...result, instructions: instructionsFor(await startup, config, request.params.capabilities) };
   });
   server.oninitialized = () => {
     initialized = true;
+    // S4 cannot list tools without a session, so its sign-in starts now (D5).
+    void startup.then(async (result) => {
+      if (result.state !== "S4" || !config.url || upstream?.session) return;
+      try {
+        await upstreamFor(config.url).open({ interactive: true, waitForLock: true });
+        await refreshSessionTools();
+      } catch (err) {
+        log(`sign-in for the tool list failed: ${describe(err)}`);
+      }
+    });
   };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -161,12 +190,12 @@ export function createServer(config: Config): { server: Server; upstream?: Upstr
     return { tools: sessionTools ?? catalog?.tools ?? [] };
   });
 
-  server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
-    if (!upstream) {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<CallToolResult> => {
+    if (!config.url) {
       return { isError: true, content: [{ type: "text", text: NO_INSTANCE_NOTE }] };
     }
     try {
-      const result = await upstream.callTool(request.params);
+      const result = await upstreamFor(config.url).callTool(request.params, extra.signal);
       if (!sessionTools) void refreshSessionTools();
       return result;
     } catch (err) {
@@ -175,7 +204,7 @@ export function createServer(config: Config): { server: Server; upstream?: Upstr
     }
   });
 
-  return { server, upstream };
+  return { server, upstream: () => upstream };
 }
 
 export async function serveStdio(config: Config): Promise<void> {
@@ -184,7 +213,9 @@ export async function serveStdio(config: Config): Promise<void> {
   await server.connect(transport);
   log(config.url ? `forwarding to ${config.url.toString().replace(/\/$/, "")}/mcp` : "BYTEBASE_URL is not set: listing the public catalog; tool calls fail until it is set");
   const shutdown = () => {
-    upstream?.reset();
+    upstream()?.reset();
+    // A pending sign-in or a stalled close must not keep the process alive once the client left.
+    setTimeout(() => process.exit(0), 1000).unref();
     void server.close().finally(() => process.exit(0));
   };
   process.on("SIGINT", shutdown);
