@@ -43,7 +43,7 @@ When the server first starts, it opens your browser on Bytebase's authorization 
 | Command | What it does |
 | --- | --- |
 | `bytebase-mcp` | Serve MCP over stdio (what your client runs) |
-| `bytebase-mcp status` | Show the instance, its tool list and the stored sign-ins, without signing in |
+| `bytebase-mcp status` | Show the instance and the stored sign-ins, without signing in |
 | `bytebase-mcp logout` | Revoke and forget every sign-in stored for the instance (does not sign you out of the console). To switch accounts: log out, reconnect the server in your client, sign in as the other account |
 
 Every command takes `--url <bytebase-url>` in place of `BYTEBASE_URL`.

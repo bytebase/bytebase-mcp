@@ -17,9 +17,9 @@ const HELP = `bytebase-mcp ${PACKAGE_VERSION}
 MCP server for Bytebase. Reads the tool list from your Bytebase instance and forwards tool calls to its OAuth-protected /mcp endpoint.
 
 Usage:
-  bytebase-mcp [--url <bytebase-url>]   Serve MCP over stdio (default); the first tool call signs in
+  bytebase-mcp [--url <bytebase-url>]   Serve MCP over stdio (default); signs in when the server starts
   bytebase-mcp logout [--url <url>]     Forget every sign-in stored for the instance
-  bytebase-mcp status [--url <url>]     Show the instance, its tool list and the stored sign-ins
+  bytebase-mcp status [--url <url>]     Show the instance and the stored sign-ins
 
 Environment:
   BYTEBASE_URL                 External URL of the Bytebase instance (required to call tools)
