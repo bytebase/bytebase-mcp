@@ -117,8 +117,9 @@ startup timeout is not hit.
 has no tools to offer, so the sign-in starts after the client's `initialized` notification, and a
 tool call made before it finishes waits for it. A sign-in that fails or times out is not restarted
 on its own, so a user who ignores it is not sent repeated browser tabs; a client restart starts it
-again. When the instance cannot be reached, opening the session is retried with backoff, capped at
-5 minutes, and the browser opens only once the instance answers. A forwarded call follows the
+again. When the instance cannot be reached, opening the session is retried up to 10 times, waiting 1
+second and doubling to at most 5 minutes (about 14 minutes in all), then stops until the client
+restarts; the browser opens only once the instance answers. A forwarded call follows the
 client: one cancelled before its session opens is never sent, a cancellation after that is
 forwarded, and the proxy sets no timeout of its own. Any forwarded request, `tools/list` as well as
 `tools/call`, is resent only after an error showing the instance never received it (connection
