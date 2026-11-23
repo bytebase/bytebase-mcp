@@ -20,3 +20,8 @@ test("loadConfig reads the environment", () => {
   assert.equal(loadConfig({}).openBrowser, true);
   assert.throws(() => loadConfig({ BYTEBASE_MCP_CALLBACK_PORT: "abc" }));
 });
+
+test("startupRetryDelaysMs: ten waits, doubling from 1s to a 5-minute ceiling, about 14 minutes in all", async () => {
+  const { startupRetryDelaysMs } = await import("../dist/retry.js");
+  assert.deepEqual(startupRetryDelaysMs(), [1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000, 300000]);
+});

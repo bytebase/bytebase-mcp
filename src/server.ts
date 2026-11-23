@@ -14,13 +14,13 @@ import {
 import type { Config } from "./config.js";
 import { log } from "./log.js";
 import { probeInstance, type InstanceProbe } from "./probe.js";
+import { startupRetryDelaysMs } from "./retry.js";
 import { loadBundledTools } from "./tools.js";
 import { Upstream, describe } from "./upstream.js";
 import { PACKAGE_VERSION } from "./version.js";
 
 /** How long initialize waits for a stored sign-in or the instance probe (docs/DESIGN.md, D4). */
 const INITIALIZE_BOUND_MS = 5000;
-const RETRY_FIRST_MS = 1000;
 /** How long tools/list waits to reopen a dropped session before answering with an error. */
 const LIST_BOUND_MS = 10_000;
 
@@ -46,7 +46,6 @@ async function withinBound<T>(work: (signal: AbortSignal) => Promise<T>, ms: num
     clearTimeout(timer);
   }
 }
-const RETRY_CAP_MS = 5 * 60 * 1000;
 
 /** Network errors: the instance gave no answer at all. */
 function isUnreachable(err: unknown): boolean {
@@ -154,11 +153,14 @@ export function createServer(config: Config): { server: Server; upstream: () => 
   }
 
   /**
-   * D5: an unreachable instance is retried with backoff, and the browser opens
-   * only once it answers. A sign-in that fails or times out is not restarted.
+   * D5: an unreachable instance is retried on a fixed schedule, and the browser
+   * opens only once it answers. A sign-in that fails or times out is not
+   * restarted, and after the last retry the proxy stops until a client restart.
    */
   async function signInWhenReachable(url: URL): Promise<void> {
-    for (let delay = RETRY_FIRST_MS; ; delay = Math.min(delay * 2, RETRY_CAP_MS)) {
+    const instance = url.toString().replace(/\/$/, "");
+    const waits = startupRetryDelaysMs();
+    for (let attempt = 0; ; attempt++) {
       try {
         await openAndAnnounce(url, true);
         return;
@@ -167,8 +169,13 @@ export function createServer(config: Config): { server: Server; upstream: () => 
           log(`sign-in failed: ${describe(err)}`);
           return;
         }
-        log(`${url.toString().replace(/\/$/, "")} cannot be reached (${describe(err)}); retrying in ${Math.round(delay / 1000)}s`);
-        await new Promise((resolve) => setTimeout(resolve, delay).unref());
+        const wait = waits[attempt];
+        if (wait === undefined) {
+          log(`${instance} still cannot be reached after ${waits.length} retries; restart the client to try again`);
+          return;
+        }
+        log(`${instance} cannot be reached (${describe(err)}); retrying in ${Math.round(wait / 1000)}s`);
+        await new Promise((resolve) => setTimeout(resolve, wait).unref());
       }
     }
   }
