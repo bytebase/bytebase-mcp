@@ -363,3 +363,21 @@ test("D5: a reopen held up by another process's lock answers within the bound", 
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.equal(bytebase.toolLists.length - listsBefore, 1, "the timed-out request was never sent");
 });
+
+test("D2: a slow tools/list on an open session is not announced as a changed list", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+  const proxy = await connect({ url: bytebase.url, home, port });
+  t.after(() => proxy.client.close());
+  assert.equal((await proxy.client.listTools()).tools.length, 2);
+
+  let announcements = 0;
+  proxy.client.setNotificationHandler(ToolListChangedNotificationSchema, () => announcements++);
+  bytebase.listDelayMs = 11000;
+  await assert.rejects(proxy.client.listTools(), /still connecting/);
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  assert.equal(announcements, 0, "a slow answer on an open session changes nothing, so it is not announced");
+});

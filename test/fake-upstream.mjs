@@ -26,7 +26,7 @@ export const SESSION_INSTRUCTIONS = "In workspaces/ws-fake, this session acts as
 export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0, port = 0 } = {}) {
   const sessions = new Map();
   const requests = [];
-  const state = { resourceMetadata, refreshDelayMs: 0 };
+  const state = { resourceMetadata, refreshDelayMs: 0, listDelayMs: 0 };
   const registrations = [];
   const initializes = [];
   const toolCalls = [];
@@ -115,7 +115,10 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
       for (const message of Array.isArray(body) ? body : body ? [body] : []) {
         if (message.method === "initialize") initializes.push(message.params);
         if (message.method === "tools/call") toolCalls.push(message.params);
-        if (message.method === "tools/list") toolLists.push(message.params);
+        if (message.method === "tools/list") {
+          toolLists.push(message.params);
+          if (state.listDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, state.listDelayMs));
+        }
       }
       const sessionId = req.headers["mcp-session-id"];
       if (sessionId) {
@@ -187,6 +190,10 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
     revokeAllTokens() {
       accessTokens.clear();
       refreshTokens.clear();
+    },
+    /** Delays answers to tools/list, as a slow instance would. */
+    set listDelayMs(ms) {
+      state.listDelayMs = ms;
     },
     /** Delays answers to refresh requests, as a slow instance would. */
     set refreshDelayMs(ms) {
