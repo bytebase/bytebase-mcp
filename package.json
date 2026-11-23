@@ -26,10 +26,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc && node scripts/mark-executable.mjs",
+    "build": "tsc && node scripts/copy-assets.mjs",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/config.test.mjs test/smoke.test.mjs test/sessions.test.mjs",
+    "sync-tools": "node scripts/sync-tools.mjs",
+    "render-readme": "node scripts/render-readme.mjs",
     "sync-version": "node scripts/sync-version.mjs",
     "version": "npm run sync-version && git add server.json",
     "prepublishOnly": "npm run build && npm test"

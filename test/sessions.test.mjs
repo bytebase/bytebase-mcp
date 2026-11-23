@@ -80,7 +80,7 @@ async function signInOnce(bytebase, home, port) {
   await proxy.client.close();
 }
 
-test("S3: a stored sign-in opens the session at initialize and passes its instructions through", async (t) => {
+test("S2: a stored sign-in opens the session at initialize and passes its instructions through", async (t) => {
   const bytebase = await startFakeBytebase();
   t.after(() => bytebase.close());
   const home = freshHome();
@@ -139,8 +139,8 @@ test("D7: two processes signing in for the first time register once and sign in 
   assert.equal(first.signIns.length + second.signIns.length, 0, "no sign-in URL was printed besides the one used");
 });
 
-test("S4: an instance without the catalog signs in after initialize and announces its tools", async (t) => {
-  const bytebase = await startFakeBytebase({ catalog: "html" });
+test("S3: a configured proxy signs in after initialize and announces its instance's tools", async (t) => {
+  const bytebase = await startFakeBytebase();
   t.after(() => bytebase.close());
   const proxy = await connect({ url: bytebase.url, home: freshHome(), port: nextPort++ });
   t.after(() => proxy.client.close());
@@ -191,7 +191,28 @@ test("D9: status shows the stored sign-ins without signing in, and logout forget
   };
   const status = JSON.parse(await run("status"));
   assert.deepEqual(status.signIns, ["sessions-client"]);
-  assert.deepEqual(status.catalog.tools, ["query_database", "get_schema"]);
+  assert.equal(status.bytebase, true);
   await run("logout");
   assert.deepEqual(JSON.parse(await run("status")).signIns, []);
+});
+
+test("D5: a stored sign-in refused after the initialize bound still leads to a browser sign-in", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+  bytebase.revokeAllTokens();
+  bytebase.refreshDelayMs = 6000;
+
+  const proxy = await connect({ url: bytebase.url, home, port });
+  t.after(() => proxy.client.close());
+  assert.match(proxy.client.getInstructions() ?? "", /sign in/i, "initialize did not wait past its bound");
+  const announced = new Promise((resolve) => proxy.client.setNotificationHandler(ToolListChangedNotificationSchema, resolve));
+  await completeSignIn(await proxy.nextSignIn());
+  await announced;
+  assert.deepEqual(
+    (await proxy.client.listTools()).tools.map((tool) => tool.name),
+    ["query_database", "get_schema"],
+  );
 });

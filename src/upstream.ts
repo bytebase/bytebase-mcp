@@ -46,6 +46,7 @@ export class Upstream {
   readonly provider: FileOAuthClientProvider;
   private client?: Client;
   private connecting?: Promise<Client>;
+  private connectingInteractive = false;
 
   constructor(
     private readonly config: Config & { url: URL },
@@ -68,7 +69,14 @@ export class Upstream {
   /** Returns the session, opening it under the sign-in's lock when needed. */
   async open(options: OpenOptions): Promise<Client> {
     if (this.client) return this.client;
+    // An opening that may not sign in (initialize's) is waited out, then a sign-in
+    // starts if it did not open the session.
+    if (this.connecting && options.interactive && !this.connectingInteractive) {
+      await this.connecting.catch(() => undefined);
+      if (this.client) return this.client;
+    }
     if (!this.connecting) {
+      this.connectingInteractive = options.interactive;
       this.connecting = this.openLocked(options).finally(() => {
         this.connecting = undefined;
       });
