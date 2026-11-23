@@ -65,6 +65,13 @@ export interface FileOAuthClientProviderOptions {
 const lockHeld = new AsyncLocalStorage<{ file: string; active: boolean }>();
 
 /**
+ * Marks the work of one session opening that may start a browser sign-in (D7).
+ * A session that opening starts can outlive it, and its own OAuth attempts
+ * later must not sign in, so the mark counts only while `active` is true.
+ */
+export const signInPermitted = new AsyncLocalStorage<{ active: boolean }>();
+
+/**
  * Keeps one client application's sign-in to one Bytebase instance in a 0600
  * file, under the rules of docs/DESIGN.md D7: the file is written only while
  * holding its lock; signing in and refreshing each run under it; the PKCE
@@ -82,8 +89,6 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
   private lastSentRefreshToken?: string;
   /** The access token the instance last refused, to tell newer tokens on disk from the rejected ones. */
   private lastRejectedAccessToken?: string;
-  /** Whether a sign-in may start now: only while a session is being opened for a tool call or S4. */
-  interactive = false;
 
   constructor(instanceUrl: URL, identity: ClientIdentity, options: FileOAuthClientProviderOptions) {
     this.options = { signInTimeoutMs: 5 * 60 * 1000, ...options };
@@ -233,7 +238,7 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
    * browser.
    */
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
-    if (!this.interactive) throw new SignInRequiredError();
+    if (!signInPermitted.getStore()?.active) throw new SignInRequiredError();
     const expectedState = this.pendingState;
     const portLock = new FileLock(path.join(this.options.home, `callback-${this.options.callbackPort}`));
     const release = await portLock.acquire({ wait: true });

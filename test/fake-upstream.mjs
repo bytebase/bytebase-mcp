@@ -25,6 +25,7 @@ export const SESSION_INSTRUCTIONS = "In workspaces/ws-fake, this session acts as
  */
 export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0, port = 0 } = {}) {
   const sessions = new Map();
+  const eventStreams = new Set();
   const requests = [];
   const state = { resourceMetadata, refreshDelayMs: 0, listDelayMs: 0, callDelayMs: 0, revokeStalls: false };
   const registrations = [];
@@ -142,6 +143,10 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
           json(res, 404, { jsonrpc: "2.0", id: null, error: { code: -32001, message: "Session not found" } });
           return;
         }
+        if (req.method === "GET") {
+          eventStreams.add(res);
+          res.on("close", () => eventStreams.delete(res));
+        }
         await transport.handleRequest(req, res, body);
         return;
       }
@@ -206,6 +211,8 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
     revokeAllTokens() {
       accessTokens.clear();
       refreshTokens.clear();
+      // Open event streams end, as they would on a revoked grant, so clients reconnect them.
+      for (const res of eventStreams) res.end();
     },
     /** Delays answers to tools/call, as a long-running tool would. */
     set callDelayMs(ms) {

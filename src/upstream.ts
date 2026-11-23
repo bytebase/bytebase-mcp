@@ -14,7 +14,7 @@ import {
   type Implementation,
   type ListToolsResult,
 } from "@modelcontextprotocol/sdk/types.js";
-import { FileOAuthClientProvider, SignInRequiredError, clientIdentity } from "./auth.js";
+import { FileOAuthClientProvider, SignInRequiredError, clientIdentity, signInPermitted } from "./auth.js";
 import { mcpEndpoint, type Config } from "./config.js";
 import { log } from "./log.js";
 
@@ -178,10 +178,18 @@ export class Upstream {
   }
 
   private async connect(interactive: boolean): Promise<Client> {
+    const permit = { active: interactive };
+    try {
+      return await signInPermitted.run(permit, () => this.attemptConnect(interactive));
+    } finally {
+      permit.active = false;
+    }
+  }
+
+  private async attemptConnect(interactive: boolean): Promise<Client> {
     const capabilities = this.hooks.clientCapabilities();
     const forwardsElicitation = Boolean(capabilities.elicitation) && Boolean(this.hooks.onElicit);
-    this.provider.interactive = interactive;
-    try {
+    {
       for (let attempt = 1; ; attempt++) {
         const transport = new StreamableHTTPClientTransport(this.endpoint, { authProvider: this.provider, fetch: this.provider.fetch });
         const client = new Client(this.clientInfo ?? { name: "bytebase-mcp", version: "0" }, {
@@ -213,8 +221,6 @@ export class Upstream {
           throw new Error(`cannot connect to ${this.endpoint}: ${describe(err)}${hint(err)}`, { cause: err });
         }
       }
-    } finally {
-      this.provider.interactive = false;
     }
   }
 }
