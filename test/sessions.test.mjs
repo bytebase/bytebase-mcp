@@ -356,8 +356,10 @@ test("D5: a reopen held up by another process's lock answers within the bound", 
   await assert.rejects(proxy.client.listTools(), /still connecting/);
   assert.ok(Date.now() - started < 15000, "bounded, not waiting on the lock");
   const listsBefore = bytebase.toolLists.length;
+  const announced = new Promise((resolve) => proxy.client.setNotificationHandler(ToolListChangedNotificationSchema, resolve));
   fs.rmSync(lock, { recursive: true, force: true });
-  assert.equal((await proxy.client.listTools()).tools.length, 2);
+  await announced;
+  assert.equal((await proxy.client.listTools()).tools.length, 2, "the client re-lists when told the reconnect finished");
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.equal(bytebase.toolLists.length - listsBefore, 1, "the timed-out request was never sent");
 });
