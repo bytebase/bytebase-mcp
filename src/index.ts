@@ -120,6 +120,9 @@ function hasTokens(file: string): boolean {
   }
 }
 
+/** How long logout waits on the instance for each request; the sign-ins are deleted either way. */
+const REVOKE_BOUND_MS = 5000;
+
 /**
  * Forgets every sign-in stored for the instance. Each refresh token is revoked
  * at the instance first, so a copy of the file stops working too; a sign-in is
@@ -130,7 +133,9 @@ async function logout(instanceUrl: URL, dir: string): Promise<void> {
   const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((name) => name.endsWith(".json")) : [];
   let revocationEndpoint: string | undefined;
   try {
-    const info = await discoverOAuthServerInfo(mcpEndpoint(instanceUrl));
+    const info = await discoverOAuthServerInfo(mcpEndpoint(instanceUrl), {
+      fetchFn: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(REVOKE_BOUND_MS) }),
+    });
     revocationEndpoint = (info.authorizationServerMetadata as { revocation_endpoint?: string } | undefined)?.revocation_endpoint;
   } catch (err) {
     log(`cannot reach ${instance} to revoke (${describe(err)}); the stored sign-ins are deleted and expire there on their own`);
@@ -147,6 +152,7 @@ async function logout(instanceUrl: URL, dir: string): Promise<void> {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({ token, token_type_hint: "refresh_token", client_id: clientId }),
+          signal: AbortSignal.timeout(REVOKE_BOUND_MS),
         }).catch((err: unknown) => err as Error);
         if (response instanceof Error || !response.ok) {
           log(`could not revoke ${name.slice(0, -".json".length)} at ${instance}; it expires there on its own`);
