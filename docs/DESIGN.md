@@ -124,7 +124,8 @@ client: one cancelled before its session opens is never sent, a cancellation aft
 forwarded, and the proxy sets no timeout of its own. Any forwarded request, `tools/list` as well as
 `tools/call`, is resent only after an error showing the instance never received it (connection
 refused, 401, unknown session), on a session reopened with the stored sign-in; Bytebase ends a
-session after an hour idle. The SDK drives OAuth:
+session after an hour idle. Reopening never cuts off calls already in flight on the old session:
+they may have run, so they finish and return their results, and the old session closes after them. The SDK drives OAuth:
 protected-resource discovery, dynamic client registration, PKCE, token exchange. The package
 handles the browser leg on the fixed loopback port 51789 (`BYTEBASE_MCP_CALLBACK_PORT`), and
 prints the sign-in URL only once that port is listening.

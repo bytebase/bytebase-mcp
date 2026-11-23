@@ -26,7 +26,7 @@ export const SESSION_INSTRUCTIONS = "In workspaces/ws-fake, this session acts as
 export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0, port = 0 } = {}) {
   const sessions = new Map();
   const requests = [];
-  const state = { resourceMetadata, refreshDelayMs: 0, listDelayMs: 0, revokeStalls: false };
+  const state = { resourceMetadata, refreshDelayMs: 0, listDelayMs: 0, callDelayMs: 0, revokeStalls: false };
   const registrations = [];
   const initializes = [];
   const toolCalls = [];
@@ -126,7 +126,10 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
       const body = raw ? JSON.parse(raw) : undefined;
       for (const message of Array.isArray(body) ? body : body ? [body] : []) {
         if (message.method === "initialize") initializes.push(message.params);
-        if (message.method === "tools/call") toolCalls.push(message.params);
+        if (message.method === "tools/call") {
+          toolCalls.push(message.params);
+          if (state.callDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, state.callDelayMs));
+        }
         if (message.method === "tools/list") {
           toolLists.push(message.params);
           if (state.listDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, state.listDelayMs));
@@ -203,6 +206,10 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
     revokeAllTokens() {
       accessTokens.clear();
       refreshTokens.clear();
+    },
+    /** Delays answers to tools/call, as a long-running tool would. */
+    set callDelayMs(ms) {
+      state.callDelayMs = ms;
     },
     /** Makes the revocation endpoint accept requests and never answer. */
     set revokeStalls(value) {

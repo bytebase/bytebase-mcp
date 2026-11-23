@@ -45,6 +45,8 @@ export class Upstream {
   private readonly endpoint: URL;
   readonly provider: FileOAuthClientProvider;
   private client?: Client;
+  private readonly inFlight = new WeakMap<Client, number>();
+  private readonly retiring = new Set<Client>();
   private connecting?: Promise<Client>;
   private connectingInteractive = false;
 
@@ -89,11 +91,34 @@ export class Upstream {
     return this.connecting;
   }
 
-  /** Forgets the current session so the next call reconnects. */
+  /** Closes the current session at once; for shutdown. */
   reset(): void {
     const client = this.client;
     this.client = undefined;
     void client?.close().catch(() => undefined);
+  }
+
+  /**
+   * Stops sending to the current session so the next request reconnects. Calls
+   * already in flight on it may have run on the instance, so it closes only once
+   * the last of them settles and they still return their results.
+   */
+  private retire(client: Client): void {
+    if (this.client === client) this.client = undefined;
+    if ((this.inFlight.get(client) ?? 0) === 0) void client.close().catch(() => undefined);
+    else this.retiring.add(client);
+  }
+
+  /** Counts a request on its session, closing a retired session after its last one. */
+  private async track<T>(client: Client, request: Promise<T>): Promise<T> {
+    this.inFlight.set(client, (this.inFlight.get(client) ?? 0) + 1);
+    try {
+      return await request;
+    } finally {
+      const left = (this.inFlight.get(client) ?? 1) - 1;
+      this.inFlight.set(client, left);
+      if (left === 0 && this.retiring.delete(client)) void client.close().catch(() => undefined);
+    }
   }
 
   /**
@@ -103,18 +128,20 @@ export class Upstream {
    * asks once more.
    */
   async listTools(cursor?: string, signal?: AbortSignal): Promise<ListToolsResult> {
+    let used: Client | undefined;
     const send = async () => {
-      const client = await this.open({ interactive: false, waitForLock: true });
+      const client = (used = await this.open({ interactive: false, waitForLock: true }));
       // A caller that gave up while the session reopened does not send the request.
       signal?.throwIfAborted();
-      return client.request({ method: "tools/list", params: cursor ? { cursor } : {} }, ListToolsResultSchema, { signal });
+      return this.track(client, client.request({ method: "tools/list", params: cursor ? { cursor } : {} }, ListToolsResultSchema, { signal }));
     };
     try {
       return await send();
     } catch (err) {
       if (signal?.aborted || !neverReceived(err)) throw err;
       log(`the instance did not receive tools/list (${describe(err)}); reconnecting`);
-      this.reset();
+      // Retire the session the request failed on, not one another call already reopened.
+      if (used) this.retire(used);
       return send();
     }
   }
@@ -125,19 +152,21 @@ export class Upstream {
    * the instance never received it.
    */
   async callTool(params: CallToolRequest["params"], signal?: AbortSignal): Promise<CallToolResult> {
+    let used: Client | undefined;
     const send = async () => {
-      const client = await this.open({ interactive: true, waitForLock: true });
+      const client = (used = await this.open({ interactive: true, waitForLock: true }));
       signal?.throwIfAborted();
       // Raw request rather than client.callTool(): that validates structuredContent
       // against a tool list it may not have, and results pass through untouched.
-      return client.request({ method: "tools/call", params }, CallToolResultSchema, { signal, timeout: NO_TIMEOUT_MS });
+      return this.track(client, client.request({ method: "tools/call", params }, CallToolResultSchema, { signal, timeout: NO_TIMEOUT_MS }));
     };
     try {
       return await send();
     } catch (err) {
       if (signal?.aborted || !neverReceived(err)) throw err;
       log(`the instance did not receive the call (${describe(err)}); reconnecting`);
-      this.reset();
+      // Retire the session the request failed on, not one another call already reopened.
+      if (used) this.retire(used);
       return send();
     }
   }

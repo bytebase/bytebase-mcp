@@ -423,3 +423,26 @@ test("D5: after the grant is revoked mid-session (reauthorize), the next call si
   const result = await call;
   assert.equal(result.content[0].text, "ran query_database", "the call ran after the new sign-in");
 });
+
+test("D5: a call in flight when the session is replaced still returns its result", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+  const proxy = await connect({ url: bytebase.url, home, port });
+  t.after(() => proxy.client.close());
+  assert.equal((await proxy.client.callTool({ name: "get_schema", arguments: {} })).content[0].text, "ran get_schema");
+
+  bytebase.callDelayMs = 1500;
+  const accepted = proxy.client.callTool({ name: "query_database", arguments: {} });
+  await new Promise((resolve) => setTimeout(resolve, 300)); // Bytebase has accepted it
+  bytebase.revokeAllTokens();
+  const next = proxy.client.callTool({ name: "get_schema", arguments: {} });
+  await completeSignIn(await proxy.nextSignIn());
+  assert.equal((await next).content[0].text, "ran get_schema");
+  const result = await accepted;
+  assert.equal(result.isError, undefined, "the accepted call was not cut off");
+  assert.equal(result.content[0].text, "ran query_database");
+  assert.equal(bytebase.toolCalls.filter((c) => c.name === "query_database").length, 1, "and was not sent twice");
+});
