@@ -520,11 +520,10 @@ test("rule 4: a successful reauthorize gets a note to reconnect, and Bytebase's 
   assert.equal(result.content[0].text, "OAuth refresh grant revoked. Retry or reconnect this MCP server to run OAuth again.");
   assert.equal(result.content.length, 2);
   assert.match(result.content[1].text, /reconnect this MCP server/i);
-  assert.match(result.content[1].text, /previous account/i, "it says what reconnecting fixes");
-  assert.doesNotMatch(result.content[1].text, /naming the account you sign in/i, "and promises no more than that");
+  assert.match(result.content[1].text, /sign in as the account you want/i);
 });
 
-test("rule 4: after a signed-out start, the reauthorize note does not claim an account was named", async (t) => {
+test("rule 4: the reauthorize note makes no claim about what the client's instructions say", async (t) => {
   const bytebase = await startFakeBytebase({ reauthorizeTool: true });
   t.after(() => bytebase.close());
   const proxy = await connect({ url: bytebase.url, home: freshHome(), port: nextPort++ });
@@ -537,5 +536,5 @@ test("rule 4: after a signed-out start, the reauthorize note does not claim an a
   const result = await proxy.client.callTool({ name: "reauthorize", arguments: {} });
   assert.equal(result.content.length, 2);
   assert.match(result.content[1].text, /reconnect this MCP server/i);
-  assert.doesNotMatch(result.content[1].text, /previous account/i, "these instructions never named an account");
+  assert.doesNotMatch(result.content[1].text, /account (is|was) named|still name|previous account/i, "the note makes no claim about the instructions");
 });
