@@ -91,9 +91,25 @@ export class Upstream {
     void client?.close().catch(() => undefined);
   }
 
-  async listTools(): Promise<ListToolsResult> {
-    const client = await this.open({ interactive: false, waitForLock: true });
-    return client.request({ method: "tools/list", params: {} }, ListToolsResultSchema);
+  /**
+   * Lists one page of the session's tools; the client's cursor goes to the
+   * instance as is. After an error showing the instance never received the
+   * request, such as a session it ended, it reopens with the stored sign-in and
+   * asks once more.
+   */
+  async listTools(cursor?: string): Promise<ListToolsResult> {
+    const send = async () => {
+      const client = await this.open({ interactive: false, waitForLock: true });
+      return client.request({ method: "tools/list", params: cursor ? { cursor } : {} }, ListToolsResultSchema);
+    };
+    try {
+      return await send();
+    } catch (err) {
+      if (!neverReceived(err)) throw err;
+      log(`the instance did not receive tools/list (${describe(err)}); reconnecting`);
+      this.reset();
+      return send();
+    }
   }
 
   /**

@@ -40,7 +40,14 @@ const upstream = new Upstream(
 const client = await upstream.open({ interactive: true, waitForLock: true });
 const serverInfo = client.getServerVersion();
 const rawInstructions = client.getInstructions() ?? "";
-const { tools } = await upstream.listTools();
+// Every page: the instance chooses its page size.
+const tools = [];
+let cursor;
+do {
+  const page = await upstream.listTools(cursor);
+  tools.push(...page.tools);
+  cursor = page.nextCursor;
+} while (cursor);
 upstream.reset();
 
 let instructions = rawInstructions;

@@ -20,6 +20,7 @@ function freshHome() {
 
 /** Starts a proxy as `clientName` and collects the sign-in URLs it prints. */
 async function connect({ url, home, port, clientName = "sessions-client", title }) {
+  // Anything not given is a fresh client of a fresh fake instance.
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [entry],
@@ -215,4 +216,76 @@ test("D5: a stored sign-in refused after the initialize bound still leads to a b
     (await proxy.client.listTools()).tools.map((tool) => tool.name),
     ["query_database", "get_schema"],
   );
+});
+
+/** Lists every tool, following the proxy's cursors. */
+async function listAll(client) {
+  const names = [];
+  let cursor;
+  do {
+    const page = await client.listTools(cursor ? { cursor } : undefined);
+    names.push(...page.tools.map((tool) => tool.name));
+    cursor = page.nextCursor;
+  } while (cursor);
+  return names;
+}
+
+test("D2: the session's pages reach the client, cursors passed through", async (t) => {
+  const bytebase = await startFakeBytebase({ pageSize: 1 });
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+
+  const proxy = await connect({ url: bytebase.url, home, port });
+  t.after(() => proxy.client.close());
+  const first = await proxy.client.listTools();
+  assert.equal(first.tools.length, 1, "the instance's page size, not the proxy's");
+  assert.ok(first.nextCursor);
+  assert.deepEqual(await listAll(proxy.client), ["query_database", "get_schema"]);
+});
+
+test("D5: tools/list after the instance ended the session reopens it with the stored sign-in", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+
+  const proxy = await connect({ url: bytebase.url, home, port });
+  t.after(() => proxy.client.close());
+  assert.equal((await proxy.client.listTools()).tools.length, 2);
+  bytebase.expireSessions();
+  assert.deepEqual((await proxy.client.listTools()).tools.map((tool) => tool.name), ["query_database", "get_schema"]);
+  assert.equal(proxy.signIns.length, 0, "no new sign-in");
+});
+
+test("rule 4: a tools/list the proxy cannot answer is a JSON-RPC error with the reason", async (t) => {
+  const bytebase = await startFakeBytebase();
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+
+  const proxy = await connect({ url: bytebase.url, home, port });
+  t.after(() => proxy.client.close());
+  assert.equal((await proxy.client.listTools()).tools.length, 2);
+  await bytebase.close();
+  await assert.rejects(proxy.client.listTools(), (err) => err.code !== undefined && /connect|reach|fetch/i.test(err.message));
+});
+
+test("D5: an instance unreachable at startup is retried, then signs in and announces its tools", async (t) => {
+  const port = 53400 + Math.floor(Math.random() * 300);
+  const url = `http://127.0.0.1:${port}`;
+  const proxy = await connect({ url, home: freshHome(), port: nextPort++ });
+  t.after(() => proxy.client.close());
+  assert.match(proxy.client.getInstructions() ?? "", /could not be reached/);
+  // Long enough for the first opening to fail, so the session comes from a retry.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+
+  const bytebase = await startFakeBytebase({ port });
+  t.after(() => bytebase.close());
+  const announced = new Promise((resolve) => proxy.client.setNotificationHandler(ToolListChangedNotificationSchema, resolve));
+  await completeSignIn(await proxy.nextSignIn());
+  await announced;
+  assert.deepEqual((await proxy.client.listTools()).tools.map((tool) => tool.name), ["query_database", "get_schema"]);
 });
