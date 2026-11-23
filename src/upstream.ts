@@ -18,14 +18,20 @@ import { FileOAuthClientProvider, SignInRequiredError, clientIdentity, signInPer
 import { mcpEndpoint, type Config } from "./config.js";
 import { log } from "./log.js";
 
-/** The proxy sets no timeout of its own on a forwarded call (docs/DESIGN.md, D5). */
-const NO_TIMEOUT_MS = 2 ** 31 - 1;
+/**
+ * The proxy adds no deadline to a forwarded request, in either direction
+ * (docs/DESIGN.md, D5); the SDK would otherwise give each one 60 seconds.
+ */
+export const NO_TIMEOUT_MS = 2 ** 31 - 1;
 
 export interface UpstreamHooks {
   /** Capabilities to declare to Bytebase: the elicitation the downstream client declared. */
   clientCapabilities: () => ClientCapabilities;
-  /** Forward an elicitation (confirmation form) from Bytebase to the downstream client. */
-  onElicit?: (params: ElicitRequest["params"]) => Promise<ElicitResult>;
+  /**
+   * Forward an elicitation (confirmation form) from Bytebase to the downstream
+   * client; `signal` aborts when Bytebase withdraws it.
+   */
+  onElicit?: (params: ElicitRequest["params"], signal: AbortSignal) => Promise<ElicitResult>;
   /** Bytebase changed its tool list. */
   onToolListChanged?: () => void;
 }
@@ -196,7 +202,7 @@ export class Upstream {
           capabilities: forwardsElicitation ? { elicitation: capabilities.elicitation } : {},
         });
         if (forwardsElicitation) {
-          client.setRequestHandler(ElicitRequestSchema, async (request) => this.hooks.onElicit!(request.params));
+          client.setRequestHandler(ElicitRequestSchema, async (request, extra) => this.hooks.onElicit!(request.params, extra.signal));
         }
         client.setNotificationHandler(ToolListChangedNotificationSchema, () => this.hooks.onToolListChanged?.());
         client.onclose = () => {

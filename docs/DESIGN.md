@@ -119,13 +119,26 @@ tool call made before it finishes waits for it. A sign-in that fails or times ou
 on its own, so a user who ignores it is not sent repeated browser tabs; a client restart starts it
 again. When the instance cannot be reached, opening the session is retried up to 10 times, waiting 1
 second and doubling to at most 5 minutes (about 14 minutes in all), then stops until the client
-restarts; the browser opens only once the instance answers. A forwarded call follows the
-client: one cancelled before its session opens is never sent, a cancellation after that is
-forwarded, and the proxy sets no timeout of its own. Any forwarded request, `tools/list` as well as
-`tools/call`, is resent only after an error showing the instance never received it (connection
-refused, 401, unknown session), on a session reopened with the stored sign-in; Bytebase ends a
-session after an hour idle. Reopening never cuts off calls already in flight on the old session:
-they may have run, so they finish and return their results, and the old session closes after them. The SDK drives OAuth:
+restarts; the browser opens only once the instance answers.
+
+A forwarded request belongs to whoever sent it: **the proxy adds no deadline and no cancellation
+of its own, in either direction, and passes the sender's cancellation on.** The SDK gives every
+request a 60-second default, so each forwarded request sets its own. Every request the proxy
+forwards:
+
+| Request | Direction | Proxy's timeout | Cancellation |
+| --- | --- | --- | --- |
+| `tools/call` | client → Bytebase | None | The client's is passed to Bytebase; a call cancelled before its session opens is never sent |
+| `tools/list` | client → Bytebase | 10 seconds while reopening a session (D2's one exception), then a JSON-RPC error | The client's, and the bound's, abort it before it is sent |
+| `elicitation/create` (a confirmation form) | Bytebase → client | None; Bytebase decides how long a form stays up (10 minutes, `confirmationLifetime` in `tool_confirm.go`) | Bytebase's is passed to the client, which takes the form down |
+| `tools/list_changed` | Bytebase → client | — (a notification) | — |
+
+Bytebase sends no other request or notification during a call, so the table is complete; a new one
+is added here before it is forwarded. Any forwarded request, `tools/list` as well as `tools/call`,
+is resent only after an error showing the instance never received it (connection refused, 401,
+unknown session), on a session reopened with the stored sign-in; Bytebase ends a session after an
+hour idle. Reopening never cuts off calls already in flight on the old session: they may have run,
+so they finish and return their results, and the old session closes after them. The SDK drives OAuth:
 protected-resource discovery, dynamic client registration, PKCE, token exchange. The package
 handles the browser leg on the fixed loopback port 51789 (`BYTEBASE_MCP_CALLBACK_PORT`), and
 prints the sign-in URL only once that port is listening.

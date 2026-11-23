@@ -16,7 +16,7 @@ import { log } from "./log.js";
 import { probeInstance, type InstanceProbe } from "./probe.js";
 import { startupRetryDelaysMs } from "./retry.js";
 import { loadBundledTools } from "./tools.js";
-import { Upstream, describe } from "./upstream.js";
+import { NO_TIMEOUT_MS, Upstream, describe } from "./upstream.js";
 import { PACKAGE_VERSION } from "./version.js";
 
 /** How long initialize waits for a stored sign-in or the instance probe (docs/DESIGN.md, D4). */
@@ -87,6 +87,10 @@ export function createServer(config: Config): { server: Server; upstream: () => 
     { name: "bytebase", title: "Bytebase", version: PACKAGE_VERSION },
     { capabilities: { tools: { listChanged: true } } },
   );
+  // Requests to the client are numbered from 1: the SDK numbers from 0, and its
+  // own cancellation handler ignores request ID 0 (`if (!requestId) return`), so a
+  // client on this SDK would keep the first withdrawn form up (D5).
+  (server as unknown as { _requestMessageId: number })._requestMessageId = 1;
   let initialized = false;
 
   // Created at initialize: a sign-in belongs to the client application (D6).
@@ -94,7 +98,8 @@ export function createServer(config: Config): { server: Server; upstream: () => 
   const upstreamFor = (url: URL): Upstream => {
     upstream ??= new Upstream({ ...config, url }, server.getClientVersion(), {
       clientCapabilities: () => server.getClientCapabilities() ?? {},
-      onElicit: (params) => server.elicitInput(params),
+      // Bytebase decides how long a form stays up, and may withdraw it (D5).
+      onElicit: (params, signal) => server.elicitInput(params, { signal, timeout: NO_TIMEOUT_MS }),
       onToolListChanged: () => void server.sendToolListChanged().catch(() => undefined),
     });
     return upstream;
