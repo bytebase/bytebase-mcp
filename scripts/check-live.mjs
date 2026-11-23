@@ -1,7 +1,8 @@
 // Manual end-to-end check against a real instance: starts dist/index.js the way
 // an MCP client would, lists tools, and runs two read-only calls through it.
-// Signed out, the first list is empty and the first call opens the browser
-// sign-in; with a stored sign-in the instance's tools are listed at once.
+// Signed out, the first list is empty and the browser sign-in opens as soon as
+// the server starts, with the first call waiting for it; with a stored sign-in
+// the instance's tools are listed at once.
 //   BYTEBASE_URL=https://your-bytebase node scripts/check-live.mjs
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";

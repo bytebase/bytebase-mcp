@@ -39,8 +39,8 @@ Each level catches what the one before cannot.
    It lists the bundled snapshot (`src/tools.json`), and every tool call answers that
    `BYTEBASE_URL` is not set.
 3. **A real instance**: `scripts/check-live.mjs` starts the server as a client would, lists tools,
-   and runs two read-only calls. Signed out, the first list is empty and the first call opens the
-   browser sign-in.
+   and runs two read-only calls. Signed out, the first list is empty and the browser sign-in opens
+   as soon as the server starts; the first call waits for it.
 
    ```bash
    BYTEBASE_URL=http://localhost:8080 BYTEBASE_MCP_HOME="$(mktemp -d)" node scripts/check-live.mjs
