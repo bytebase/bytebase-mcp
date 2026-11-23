@@ -65,11 +65,26 @@ export interface FileOAuthClientProviderOptions {
 const lockHeld = new AsyncLocalStorage<{ file: string; active: boolean }>();
 
 /**
- * Marks the work of one session opening that may start a browser sign-in (D7).
- * A session that opening starts can outlive it, and its own OAuth attempts
- * later must not sign in, so the mark counts only while `active` is true.
+ * One session opening that may start a browser sign-in (D7), and the state of
+ * that sign-in. The state lives here, not on the shared provider, so nothing
+ * outside the opening (a retired session's own OAuth attempt) can overwrite
+ * it. A session the opening starts can outlive it, so this counts only while
+ * `active` is true.
  */
-export const signInPermitted = new AsyncLocalStorage<{ active: boolean }>();
+export interface SignInPermit {
+  active: boolean;
+  state?: string;
+  verifier?: string;
+  pendingCode?: Promise<string>;
+}
+
+export const signInPermitted = new AsyncLocalStorage<SignInPermit>();
+
+/** The permit of the opening this work belongs to, if it is still in progress. */
+function activePermit(): SignInPermit | undefined {
+  const permit = signInPermitted.getStore();
+  return permit?.active ? permit : undefined;
+}
 
 /**
  * Keeps one client application's sign-in to one Bytebase instance in a 0600
@@ -83,9 +98,6 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
   private readonly lock: FileLock;
   private readonly options: Required<FileOAuthClientProviderOptions>;
   private readonly identity: ClientIdentity;
-  private verifier?: string;
-  private pendingState?: string;
-  private pendingCode?: Promise<string>;
   private lastSentRefreshToken?: string;
   /** The access token the instance last refused, to tell newer tokens on disk from the rejected ones. */
   private lastRejectedAccessToken?: string;
@@ -136,8 +148,10 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
   }
 
   state(): string {
-    this.pendingState = randomBytes(16).toString("hex");
-    return this.pendingState;
+    const value = randomBytes(16).toString("hex");
+    const permit = activePermit();
+    if (permit) permit.state = value;
+    return value;
   }
 
   clientInformation(): OAuthClientInformationMixed | undefined {
@@ -166,17 +180,20 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
   }
 
   saveCodeVerifier(codeVerifier: string): void {
-    this.verifier = codeVerifier;
+    const permit = activePermit();
+    if (permit) permit.verifier = codeVerifier;
   }
 
   codeVerifier(): string {
-    if (!this.verifier) throw new Error("No PKCE code verifier in this process; restart the sign-in");
-    return this.verifier;
+    const verifier = activePermit()?.verifier;
+    if (!verifier) throw new Error("No PKCE code verifier for this sign-in; restart the sign-in");
+    return verifier;
   }
 
   async invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier" | "discovery"): Promise<void> {
     if (scope === "verifier") {
-      this.verifier = undefined;
+      const permit = activePermit();
+      if (permit) permit.verifier = undefined;
       return;
     }
     if (scope === "discovery") return;
@@ -238,12 +255,13 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
    * browser.
    */
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
-    if (!signInPermitted.getStore()?.active) throw new SignInRequiredError();
-    const expectedState = this.pendingState;
+    const permit = activePermit();
+    if (!permit) throw new SignInRequiredError();
+    const expectedState = permit.state;
     const portLock = new FileLock(path.join(this.options.home, `callback-${this.options.callbackPort}`));
     const release = await portLock.acquire({ wait: true });
     const { listening, code } = this.listenForCode(expectedState);
-    this.pendingCode = code.finally(() => release?.());
+    permit.pendingCode = code.finally(() => release?.());
     // The URL is printed only once the callback can be received.
     await listening;
     log(`Sign in to Bytebase to continue:\n  ${authorizationUrl.toString()}`);
@@ -251,11 +269,12 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
   }
 
   async waitForAuthorizationCode(): Promise<string> {
-    if (!this.pendingCode) throw new Error("No sign-in in progress");
+    const permit = activePermit();
+    if (!permit?.pendingCode) throw new Error("No sign-in in progress");
     try {
-      return await this.pendingCode;
+      return await permit.pendingCode;
     } finally {
-      this.pendingCode = undefined;
+      permit.pendingCode = undefined;
     }
   }
 
