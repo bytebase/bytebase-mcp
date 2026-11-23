@@ -144,8 +144,9 @@ client application signs in once per instance, as it would over a direct connect
 
 **D7 · Tokens are stored per sign-in, and one lock guards every write.** One file per sign-in at
 `<home>/<instance key>/<client key>.json` (mode 0600, directory 0700), written to a temp file and
-renamed. `home` is `BYTEBASE_MCP_HOME`, by default `$XDG_CONFIG_HOME/bytebase-mcp` or
-`~/.config/bytebase-mcp`. The instance key is host, port and path, so two instances on one host
+renamed. `home` is `BYTEBASE_MCP_HOME`, by default `~/.bytebase-mcp`: these are credentials, not
+configuration, so not under `~/.config`, which people often sync or keep in dotfile repositories.
+The instance key is host, port and path, so two instances on one host
 under different paths do not collide; the client key is `clientInfo.name` with characters outside
 `[A-Za-z0-9._-]` replaced. Bytebase refresh tokens are single-use (`ConsumeOAuth2RefreshToken` in
 `backend/api/oauth2/token.go`), and clients start one proxy process per session, so several

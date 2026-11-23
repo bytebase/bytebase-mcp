@@ -36,7 +36,7 @@ Add the server to your MCP client with your instance's external URL:
 }
 ```
 
-The first tool call opens your browser on Bytebase's authorization page. Sign in, review what the session may do, and click **Allow**. Bytebase shows your AI client by name there, and each client application signs in once per instance. The token is stored under `~/.config/bytebase-mcp/` with owner-only permissions and refreshed automatically; several sessions share it safely. Set `BYTEBASE_MCP_NO_BROWSER=1` to print the sign-in URL instead of opening a browser.
+The first tool call opens your browser on Bytebase's authorization page. Sign in, review what the session may do, and click **Allow**. Bytebase shows your AI client by name there, and each client application signs in once per instance. The token is stored under `~/.bytebase-mcp/` with owner-only permissions and refreshed automatically; several sessions share it safely. Set `BYTEBASE_MCP_NO_BROWSER=1` to print the sign-in URL instead of opening a browser.
 
 ### Commands
 
@@ -53,7 +53,7 @@ Every command takes `--url <bytebase-url>` in place of `BYTEBASE_URL`.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `BYTEBASE_URL` | – | External URL of the instance. Required to call tools. |
-| `BYTEBASE_MCP_HOME` | `~/.config/bytebase-mcp` | Where token files live, one per instance host |
+| `BYTEBASE_MCP_HOME` | `~/.bytebase-mcp` | Where sign-ins live, one per instance and client app |
 | `BYTEBASE_MCP_CALLBACK_PORT` | `51789` | Loopback port that receives the OAuth redirect |
 | `BYTEBASE_MCP_NO_BROWSER` | unset | Set to `1` to print the sign-in URL instead of opening a browser |
 

@@ -25,3 +25,11 @@ test("startupRetryDelaysMs: ten waits, doubling from 1s to a 5-minute ceiling, a
   const { startupRetryDelaysMs } = await import("../dist/retry.js");
   assert.deepEqual(startupRetryDelaysMs(), [1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000, 300000]);
 });
+
+test("loadConfig keeps sign-ins in ~/.bytebase-mcp, not under XDG config", async () => {
+  const os = await import("node:os");
+  const path = await import("node:path");
+  assert.equal(loadConfig({}).home, path.join(os.homedir(), ".bytebase-mcp"));
+  assert.equal(loadConfig({ XDG_CONFIG_HOME: "/tmp/xdg" }).home, path.join(os.homedir(), ".bytebase-mcp"));
+  assert.equal(loadConfig({ BYTEBASE_MCP_HOME: "/tmp/elsewhere" }).home, "/tmp/elsewhere");
+});
