@@ -5,7 +5,7 @@
 import http from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { ElicitResultSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createHash, randomUUID } from "node:crypto";
 
 /** The tools the fake's MCP endpoint serves. */
@@ -23,11 +23,11 @@ export const SESSION_INSTRUCTIONS = "In workspaces/ws-fake, this session acts as
  * Starts the fake. Without `resourceMetadata` it answers like a server that is
  * not Bytebase. `pageSize` makes tools/list page; `port` fixes the port.
  */
-export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0, port = 0 } = {}) {
+export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0, port = 0, streamed = false } = {}) {
   const sessions = new Map();
   const eventStreams = new Set();
   const requests = [];
-  const state = { resourceMetadata, refreshDelayMs: 0, listDelayMs: 0, callDelayMs: 0, revokeStalls: false };
+  const state = { resourceMetadata, refreshDelayMs: 0, listDelayMs: 0, callDelayMs: 0, revokeStalls: false, withdrawFormAfterMs: 0 };
   const registrations = [];
   const initializes = [];
   const toolCalls = [];
@@ -159,9 +159,31 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
         return;
       }
       const mcp = new McpServer({ name: "fake-bytebase", version: "0.0.0" }, { instructions: SESSION_INSTRUCTIONS });
+      // Bytebase's Go SDK numbers its requests from 1 (jsonrpc2 conn.go); this SDK starts at 0.
+      mcp.server._requestMessageId = 1;
       for (const tool of FAKE_TOOLS.tools) {
         mcp.registerTool(tool.name, { description: tool.description }, async () => ({ content: [{ type: "text", text: `ran ${tool.name}` }] }));
       }
+      // Asks for confirmation with a form, as Bytebase's decide_issue does, and
+      // waits up to Bytebase's confirmationLifetime (10 minutes) for the answer.
+      if (streamed) mcp.registerTool("confirm_change", { description: "Asks the user to confirm." }, async (extra) => {
+        const withdraw = new AbortController();
+        if (state.withdrawFormAfterMs > 0) setTimeout(() => withdraw.abort(), state.withdrawFormAfterMs);
+        try {
+          // Sent within the call, so the form and its withdrawal travel on the call's stream.
+          const answer = await extra.sendRequest(
+            { method: "elicitation/create", params: { mode: "form", message: "Approve the change?", requestedSchema: { type: "object", properties: {} } } },
+            ElicitResultSchema,
+            { timeout: 10 * 60 * 1000, signal: withdraw.signal },
+          );
+          return { content: [{ type: "text", text: `form ${answer.action}` }] };
+        } catch (err) {
+          // The SDK sends the cancellation without waiting; let it leave before the result
+          // closes the call's stream, as Bytebase's arrives on a stream of its own.
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          return { content: [{ type: "text", text: `form withdrawn (${err.message})` }] };
+        }
+      });
       if (pageSize > 0) {
         // Pages the list like a server with a small page size; the cursor is an offset.
         mcp.server.setRequestHandler(ListToolsRequestSchema, async (request) => {
@@ -173,7 +195,8 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
       }
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
-        enableJsonResponse: true,
+        // A form is a request sent to the client during a call, so form tests stream responses.
+        enableJsonResponse: !streamed,
         onsessioninitialized: (id) => sessions.set(id, transport),
       });
       transport.onclose = () => {
@@ -225,6 +248,10 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
     /** Delays answers to tools/call, as a long-running tool would. */
     set callDelayMs(ms) {
       state.callDelayMs = ms;
+    },
+    /** Withdraws each confirmation form this long after sending it, as Bytebase can. */
+    set withdrawFormAfterMs(ms) {
+      state.withdrawFormAfterMs = ms;
     },
     /** Makes the revocation endpoint accept requests and never answer. */
     set revokeStalls(value) {

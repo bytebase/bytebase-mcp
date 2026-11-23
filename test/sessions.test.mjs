@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import { ElicitRequestSchema, ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { completeSignIn, startFakeBytebase, SESSION_INSTRUCTIONS } from "./fake-upstream.mjs";
 
 const entry = path.join(import.meta.dirname, "..", "dist", "index.js");
@@ -19,7 +19,7 @@ function freshHome() {
 }
 
 /** Starts a proxy as `clientName` and collects the sign-in URLs it prints. */
-async function connect({ url, home, port, clientName = "sessions-client", title }) {
+async function connect({ url, home, port, clientName = "sessions-client", title, onForm }) {
   // Anything not given is a fresh client of a fresh fake instance.
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -35,7 +35,8 @@ async function connect({ url, home, port, clientName = "sessions-client", title 
   });
   const signIns = [];
   const waiters = [];
-  const client = new Client({ name: clientName, title, version: "1.2.3" }, { capabilities: {} });
+  const client = new Client({ name: clientName, title, version: "1.2.3" }, { capabilities: onForm ? { elicitation: { form: {} } } : {} });
+  if (onForm) client.setRequestHandler(ElicitRequestSchema, (request, extra) => onForm(request.params, extra));
   const started = client.connect(transport);
   transport.stderr.setEncoding("utf8");
   transport.stderr.on("data", (text) => {
@@ -449,4 +450,56 @@ test("D5: a call in flight when the session is replaced still returns its result
   assert.equal(result.isError, undefined, "the accepted call was not cut off");
   assert.equal(result.content[0].text, "ran query_database");
   assert.equal(bytebase.toolCalls.filter((c) => c.name === "query_database").length, 1, "and was not sent twice");
+});
+
+test("D5: a confirmation form stays up past the SDK's 60-second default", { timeout: 120000 }, async (t) => {
+  const bytebase = await startFakeBytebase({ streamed: true });
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+  let withdrawn = false;
+  const proxy = await connect({
+    url: bytebase.url,
+    home,
+    port,
+    // The user reads the form for longer than a minute, then approves.
+    onForm: async (_params, extra) => {
+      extra.signal.addEventListener("abort", () => (withdrawn = true));
+      await new Promise((resolve) => setTimeout(resolve, 62000));
+      return { action: "accept", content: {} };
+    },
+  });
+  t.after(() => proxy.client.close());
+  const result = await proxy.client.callTool({ name: "confirm_change", arguments: {} }, undefined, { timeout: 110000 });
+  assert.equal(withdrawn, false, "the form was not taken down");
+  assert.equal(result.content[0].text, "form accept", "the answer reached Bytebase");
+});
+
+test("D5: a form Bytebase withdraws is taken down in the client", async (t) => {
+  const bytebase = await startFakeBytebase({ streamed: true });
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+  bytebase.withdrawFormAfterMs = 500;
+  let withdrawnAt;
+  const shown = Date.now();
+  const proxy = await connect({
+    url: bytebase.url,
+    home,
+    port,
+    onForm: (_params, extra) =>
+      new Promise((resolve) => {
+        extra.signal.addEventListener("abort", () => {
+          withdrawnAt = Date.now();
+          resolve({ action: "cancel" });
+        });
+      }),
+  });
+  t.after(() => proxy.client.close());
+  const result = await proxy.client.callTool({ name: "confirm_change", arguments: {} });
+  assert.match(result.content[0].text, /withdrawn/);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.ok(withdrawnAt !== undefined && withdrawnAt - shown < 5000, "the client was told to take the form down");
 });
