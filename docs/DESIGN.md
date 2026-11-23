@@ -1,130 +1,132 @@
-# Design: a pure proxy for Bytebase's built-in MCP server
+# Design: a proxy that gets Bytebase's tools from the instance
 
-Status: implemented in this PR · 2026-11-22 · Linear BYT-10055 · server companion:
-[bytebase `docs/design/mcp-public-catalog.md`](https://github.com/bytebase/bytebase/blob/main/docs/design/mcp-public-catalog.md)
+Status: proposal (revision 2) · 2026-11-22 · Linear BYT-10055
 
 This package lets MCP directories and local-command clients use the MCP server built into every
-Bytebase instance. The first version (2026-11-16) shipped a copy of that server's tool list. This
-version keeps no tool list. **The package reads the tool list from a Bytebase server and forwards
-tool calls to the instance named by `BYTEBASE_URL`; with no instance named it reads the list from
-Bytebase Cloud and runs nothing.** The server side of this, an unauthenticated
-`GET /mcp/catalog` route, is specified in the companion doc. This file replaces the design sections
-of the first version's notes; the last two sections say what was kept and what changed.
+Bytebase instance. **A configured proxy gets every tool and instruction from its Bytebase
+instance, after sign-in. A snapshot of the tool list ships in the package for one purpose,
+letting MCP directories list Bytebase when no instance is configured, and a configured proxy never
+reads it.** This file replaces the first version's design notes (2026-11-16); the last sections
+say what was kept and what changed.
 
 ## Problem
 
 Bytebase serves MCP at `<external URL>/mcp` (Streamable HTTP, OAuth). It is not in any MCP
 directory:
 
-- Directories list servers they can start themselves, then read `tools/list` without signing in.
-  Glama builds the repository and starts the server with no configuration. The built-in server runs
-  only inside the Bytebase process, and `/mcp` answers every request without a bearer token with
-  401 (`authMiddleware` and `mcpauth.RequireBearerToken` in `backend/api/mcp/server.go`).
+- Of the directories that matter, only Glama starts a package to read its tools. It builds the
+  repository and starts the server with no configuration, then reads `tools/list`. The official
+  MCP registry and awesome-mcp-servers list a package from its metadata and never start it.
+- The built-in server runs only inside the Bytebase process, and `/mcp` answers every request
+  without a valid bearer token with 401 (`authMiddleware` in `backend/api/mcp/server.go`).
 - A third-party package holds the npm name `bytebase-mcp` and ranks first for "bytebase" on Glama.
   It reimplements its own tools on the Connect API and has not been maintained since 2026-09-14
   (Adela's notes, 2026-11-16).
 
-The first version answered `tools/list` from `src/tools.json`, dumped from Bytebase 3.24.1. Within
-a week it was stale: main dropped `get_skill` and added `request_access_grant`,
-`administer_workspace` and `get_gitops_workflow`. Bytebase Cloud deploys continuously, and every
-self-hosted instance runs its own release, so no single copy is right for everyone.
+The first version shipped `src/tools.json`, dumped from Bytebase 3.24.1, and answered every
+client's `tools/list` from it until a live list arrived. Within a week it was stale: main dropped
+`get_skill` and added `request_access_grant`, `administer_workspace` and `get_gitops_workflow`.
+Users saw tools their instance did not have.
 
 ## Principle
 
-> The package holds no Bytebase behavior. Every tool name, schema, description and instruction
-> comes from a Bytebase server at run time; the package adds only transport, sign-in, and the
-> words for its own states. The one Bytebase rule it copies is the form paragraph: when it
-> applies, and its substance where the instance's text cannot be read (D4).
+> Users see only what their instance serves. The package adds transport, sign-in, the words for
+> its own states, and a tool-list snapshot used only for directory listings. The one Bytebase rule
+> it copies is when the form paragraph applies (D4).
 
 ## Approaches weighed
 
-**A. Bundle plus a sync script (first version).** Works with no network. But the bundle drifts,
-regenerating it needs a running instance and a browser sign-in, and every tool change needs a
-package release. Rejected for drift.
+**A. One bundled list for everyone (first version).** Works offline, but every user sees a list
+frozen at the last sync. Rejected for drift.
 
-**B. Source in a subfolder of the main repository, plus a mirror.** A Go test writes `tools.json`
-as a checked golden file, the main release workflow publishes npm and the registry, and a
-read-only mirror feeds Glama and the awesome list (both key a listing to a whole repository).
-This removes the manual step, but the copy is still frozen at each release: Cloud runs between
-releases, and an older instance gets a newer list. It also adds mirror machinery. Rejected: it
-narrows drift without removing it.
+**B. Source in a subfolder of the main repository, with a mirror for directories.** A Go test
+writes the list at each release. That narrows the drift without removing it (Cloud deploys between
+releases; older instances get a newer list), and adds mirror machinery. Rejected.
 
-**C. Pure proxy with a public catalog route (chosen).** The server publishes its own tool list
-without a token, and the package reads it. Nothing is copied, so nothing drifts, and tool changes
-need no package release. Costs, each accepted:
+**C. A public catalog route on the server.** `GET /mcp/catalog` answering without a token, read by
+the package before sign-in. Built and reviewed in bytebase/bytebase#22184, then closed: its only
+consumer is a directory scan of an unconfigured package, which does not justify an unauthenticated
+route on every instance.
 
-- A server change: one unauthenticated read-only route (companion doc).
-- The directory cold start needs the network. Glama's scan can reach it: its listing of
-  `evalstate/mcp-hfspace` shows a tool that server only learns by connecting to Hugging Face at
-  startup. Glama flags traffic to hosts not named in the source, so the Cloud URL is a literal in
-  the source (D3).
-- Instances older than the route cannot list tools before sign-in (state S4).
+**D. No list before sign-in at all.** Simplest. Glama still lists the package, but with no tools
+and no quality grade: sign-in-first bridges such as a fork of `mcp-remote` show "Not graded" there.
+
+**E. Snapshot for directories, instance for users (chosen).** Directories get the snapshot; users
+never do. Drift can only age the directory listing, and a release refreshes it.
+
+Prior art for the user side is `mcp-remote` (geelen/mcp-remote): it signs in before it connects,
+then passes `initialize`, `tools/list` and everything else through. Signing in before answering
+`initialize` runs into client startup timeouts; that fork's README lists Claude's 60-second timeout
+as an open problem. So this proxy answers `initialize` at once and signs in afterwards (D4, D5).
 
 The package stays in its own repository, for the reasons the first version gave: Glama and the
 awesome list index a repository root, the license is plain MIT, npm trusted publishing and the
 registry's OIDC bind to one repository and workflow, and releases are independent (precedent:
-`bytebase/dbhub`). Approach C removes the drift that was the cost of that choice.
+`bytebase/dbhub`).
 
 ## Decisions
 
 **D1 · The instance is named by `BYTEBASE_URL` or `--url`.** `--url` wins when both are set. The
 value is the instance's external URL; `parseBytebaseUrl` accepts a bare host and strips a trailing
 `/` or `/mcp`. This follows comparable packages (`GRAFANA_URL`, `JIRA_URL`, `mcp-remote <url>`).
-Rejected: asking for the URL with form elicitation at first use. Few clients support it, and the
+Configuration is read once, at startup: a changed URL takes effect when the client restarts the
+server, with a fresh `initialize`, so one process never changes state between unconfigured and
+configured. Rejected: asking for the URL with form elicitation at first use. Few clients support it, and the
 client config already has an `env` block. It can come later.
 
-**D2 · The tool list comes from `GET <base>/mcp/catalog`.** The response is
-`{instructions, instructionsWithoutForm, tools}` (companion doc). A response counts as a catalog
-only if it is `200`, `application/json`, and has a `tools` array; anything else means "no
-catalog". This matters because an instance without the route answers `200 text/html` with the
-console's page (the frontend's HTML5 fallback serves it for unknown paths; Cloud answers that way
-today), so a status check alone would misread it. Before a session is open, `tools/list` answers
-from the catalog. Once a session is open, it answers from the session, sends `tools/list_changed`
-if the session's list differs from the catalog's, and forwards the instance's
-`tools/list_changed`.
+**D2 · Where `tools/list` comes from depends on configuration, not on sign-in.**
 
-**D3 · Bytebase Cloud is the public source, and only for the unconfigured proxy.** With no URL,
-the package reads `https://cloud.bytebase.com/mcp/catalog`, a literal in the source.
-`BYTEBASE_MCP_PUBLIC_CATALOG_URL` replaces it for tests. A proxy with a URL never contacts Cloud,
-not even as a fallback when its instance is old or unreachable. Contacting Cloud would tell
-Bytebase about a self-hosted user's activity, and Cloud's list would describe tools the instance
-may not have. Tool calls and sign-in never go to Cloud by default; a Cloud user names Cloud as
-their instance like anyone else.
+- No URL configured: the snapshot (D3), in one page.
+- URL configured, session open: the session's `tools/list`. The client's `cursor` is passed to the
+  instance and the instance's `nextCursor` back, so the instance pages its own list.
+- URL configured, no session yet: an empty list. When a session opens, the proxy sends
+  `tools/list_changed`; afterwards it forwards the instance's own.
+
+Keying on sign-in instead would show the snapshot to a configured user before they sign in, which
+is the drift this design removes.
+
+**D3 · The snapshot is generated from an instance and used only when no URL is configured.**
+`src/tools.json` holds `bytebaseVersion`, `generatedAt`, `instructions` and `tools`.
+`npm run sync-tools` regenerates it before a release, against an instance on the target release:
+it signs in as the package does, reads every page of `tools/list`, and strips the per-session parts
+of the instructions (the account line, and the paragraph Bytebase adds for clients without forms).
+The README's tools table is rendered from it and labeled as a snapshot. A stale snapshot only ages
+the directory listing, so a manual sync per release is enough; nothing checks it in CI, because
+that would need an instance.
 
 **D4 · The initialize instructions are fixed when the client initializes.** MCP has no
-notification for changed instructions, so the proxy decides once, from the state it is in at
-`initialize` (States below):
+notification for changed instructions, so the proxy decides once, from its state at `initialize`
+(States below):
 
-- Signed in: the instance's own initialize instructions, verbatim. The proxy opens the session
+- No URL (S1): a one-line note that no instance is connected, then the snapshot's instructions.
+- Signed in (S2): the instance's own initialize instructions, verbatim. The proxy opens the session
   inside the client's `initialize`, declaring elicitation exactly as the client declared it, so
-  the instance writes the per-session account line and the form paragraph exactly as for a
-  direct connection.
-- Signed out, catalog read: `instructions`, plus `instructionsWithoutForm` when the client's
-  elicitation capability is absent or names `url` without `form`. This copies the instance's own
-  rule (`declaresFormElicitation` in `tool_resolve.go`, applied by `askInChatWithoutForm` in
-  `server.go`), with both texts from the instance. The account line is absent: nobody has signed
-  in yet. With no URL configured (S1), the catalog is Cloud's, and a one-line note that no
-  instance is connected comes first.
-- Every other state: one fixed paragraph from the package that names the state and the fix. In
-  S4 and S5, where tools can appear later, for a client the form rule above applies to, it ends
-  with the package's one-sentence version of the
-  form paragraph (before running a statement that may write, show it to the user and ask them to
-  confirm), because the instance's text cannot be read before sign-in and instructions cannot
-  change afterwards.
+  the instance writes the per-session account line and the form paragraph as for a direct
+  connection.
+- Configured, no session (S3, S4): one fixed paragraph from the package that names the state and
+  what happens next. For a client whose elicitation capability is absent or names `url` without
+  `form`, it ends with the package's one-sentence version of the form paragraph (before running a
+  statement that may write, show it to the user and ask them to confirm), because the instance's
+  text cannot be read before sign-in. The rule copies the instance's own
+  (`declaresFormElicitation` in Bytebase's `tool_resolve.go`).
 
-Waiting for the catalog or the session is bounded at 5 seconds in total, so a client's startup
-timeout is not hit. Rejected: answering `initialize` only after sign-in. A browser sign-in takes
-minutes, and clients give up on servers that do not start.
+Opening the session and probing the instance are bounded at 5 seconds in total, so a client's
+startup timeout is not hit.
 
-**D5 · Sign-in starts when a tool needs it.** The first `tools/call` without a session opens the
-session, and with it the browser sign-in, then forwards the call. One exception, set by the states
-table: an instance without a catalog (S4) starts sign-in right after the client's `initialized`
-notification, because otherwise it cannot list tools at all. A forwarded call follows the client:
-one cancelled before its session opens is never sent, a cancellation after that is forwarded, the
-proxy sets no timeout of its own, and it resends a call only after an error showing the instance
-never received it (connection refused, 401, unknown session). The SDK still drives OAuth:
+**D5 · A configured proxy signs in right after the client initializes.** Without a session it
+has no tools to offer, so the sign-in starts after the client's `initialized` notification, and a
+tool call made before it finishes waits for it. A sign-in that fails or times out is not restarted
+on its own, so a user who ignores it is not sent repeated browser tabs; a client restart starts it
+again. When the instance cannot be reached, opening the session is retried with backoff, capped at
+5 minutes, and the browser opens only once the instance answers. A forwarded call follows the
+client: one cancelled before its session opens is never sent, a cancellation after that is
+forwarded, and the proxy sets no timeout of its own. Any forwarded request, `tools/list` as well as
+`tools/call`, is resent only after an error showing the instance never received it (connection
+refused, 401, unknown session), on a session reopened with the stored sign-in; Bytebase ends a
+session after an hour idle. The SDK drives OAuth:
 protected-resource discovery, dynamic client registration, PKCE, token exchange. The package
-handles the browser leg on the fixed loopback port 51789 (`BYTEBASE_MCP_CALLBACK_PORT`).
+handles the browser leg on the fixed loopback port 51789 (`BYTEBASE_MCP_CALLBACK_PORT`), and
+prints the sign-in URL only once that port is listening.
 
 **D6 · The real client's identity reaches the instance.** A sign-in belongs to one client
 application on one instance. The proxy registers one OAuth client per `(instance, client)`, named
@@ -147,8 +149,8 @@ under different paths do not collide; the client key is `clientInfo.name` with c
 `backend/api/oauth2/token.go`), and clients start one proxy process per session, so several
 processes share one sign-in. Rules:
 
-- **The sign-in file is written only while holding its lock**: an atomic `mkdir` of
-  `<file>.lock` that records the holder's process ID, abandoned once that process is gone.
+- **The sign-in file is written only while holding its lock**: a directory `<file>.lock`, created
+  by renaming one that already holds the owner's process ID, abandoned once that process is gone.
 - Signing in (registration through saved tokens) and refreshing (token request through saved
   tokens) each run under the lock. A process that gets the lock re-reads the file and skips what
   it shows done: it reuses a stored registration, and uses tokens newer than its own instead of
@@ -159,7 +161,7 @@ processes share one sign-in. Rules:
 - The browser leg also holds a machine-wide lock on the callback port, which every sign-in on the
   machine shares.
 - Nothing waits for a lock inside `initialize`. There the proxy uses what the file holds, and a
-  sign-in it would need makes the state signed out (S2, S4).
+  sign-in it would need makes the state signed out (S3).
 
 The SDK ends a sign-in at the browser redirect and exchanges the code in a later call, and saves
 tokens only after a token request returns. So the proxy takes the lock itself, at two places:
@@ -167,118 +169,104 @@ tokens only after a token request returns. So the proxy takes the lock itself, a
 - Around opening a session: from before the SDK reads the stored registration until the session
   is open or has failed. This spans registration, the browser leg and the code exchange.
 - Around a refresh in an open session: in the `fetch` the proxy gives the SDK transport, from the
-  token request until the provider has saved or discarded the result. The SDK builds the request
-  from the tokens it read before, so when the request's refresh token is no longer the one on
-  disk, the `fetch` answers it with the tokens on disk instead of sending it.
+  token request until the result is on disk. The SDK builds the request from tokens it read
+  earlier, so when the file holds newer tokens than the rejected ones, the `fetch` answers with
+  those instead of sending the request.
 
-The lock is reentrant only for the session opening that holds it, so a refresh inside that
-opening does not wait on itself. Concurrent refreshes in one process wait for each other as those
-of different processes do. Inside `initialize` the proxy opens a session only if it gets the lock without waiting,
-and refuses any sign-in there; otherwise the state is signed out. A sign-in starts only while a
-session is being opened for a tool call or for S4's background sign-in. If the SDK tries to start
-one anywhere else, as it does after a refused refresh, the provider refuses it. The call then
-fails with a sign-in-needed error, and the next tool call opens the session under the lock.
+The lock is reentrant only while the session opening that holds it is in progress, so a refresh
+inside that opening does not wait on itself, and work the opening starts but outlives it (the SDK's
+event stream) takes the lock like anyone else. Concurrent refreshes in one process wait for each
+other as those of different processes do. A sign-in starts only while a session is being opened
+for D5's sign-in or a tool call. If the SDK tries to start one anywhere else, as it does after a
+refused refresh, the provider refuses it, the call fails with a sign-in-needed error, and the next
+tool call opens the session under the lock.
 
-**D8 · Versioning is independent of Bytebase.** The package has its own semver. It works with any
-instance from 3.22, the first with MCP OAuth, and lists tools before sign-in on instances from the
-release that adds the catalog route. The package records no Bytebase version, because it holds
-nothing from one. `server.json` keeps following `package.json` (`scripts/sync-version.mjs`).
+**D8 · Versioning is independent of Bytebase.** The package has its own semver and works with any
+instance from 3.22, the first with MCP OAuth. The snapshot records the Bytebase version it was
+read from (`bytebaseVersion`); that only describes the directory listing. `server.json` keeps
+following `package.json` (`scripts/sync-version.mjs`).
 
 **D9 · The commands are `serve`, `logout` and `status`.** `serve` (the default) is what clients
 run. `logout` deletes every sign-in stored for the instance. `status` prints the instance, whether
-it serves a catalog and how many tools it lists, and the stored sign-ins by client, without
-signing in. `login` goes (D6). `whoami` becomes `status`, which needs no session.
+it answers as Bytebase, and the stored sign-ins by client, without signing in. `login` goes (D6); `whoami` becomes `status`, which needs no session.
 
 ## States
 
-A state is decided at startup from three facts: whether a URL is configured; what the catalog
-request returned; and whether a stored sign-in opens a session within the initialize bound without
-asking the user. When the catalog request gets an HTTP answer that is not a catalog, the proxy
-asks `GET <base>/.well-known/oauth-protected-resource/mcp`: a JSON document whose `resource` is
-`<base>/mcp` means Bytebase without a catalog at this URL (S4); anything else means not Bytebase
-(S5). A catalog request with no answer within the initialize bound is unreachable (S5).
+A configured proxy decides its state at startup from two facts: whether a stored sign-in opens a
+session within the initialize bound without asking the user, and what
+`GET <base>/.well-known/oauth-protected-resource/mcp` returns. A JSON document whose `resource` is
+`<base>/mcp` means Bytebase; any other answer means not Bytebase; no answer within the bound means
+unreachable.
 
 | State | Instructions at initialize | `tools/list` | `tools/call` |
 | --- | --- | --- | --- |
-| **S1** No URL configured | A fixed note (no Bytebase instance is connected; set `BYTEBASE_URL` to the instance's external URL in the client's config and restart), then Cloud catalog's instructions as in S2. The note alone if Cloud cannot be read. | Cloud catalog's tools. Empty if Cloud cannot be read. | Error result with the same fix. Nothing is sent anywhere. |
-| **S2** Catalog read, signed out | Catalog `instructions`, plus `instructionsWithoutForm` for a client without form elicitation. | The catalog's tools; the session's after the first call opens one. | Opens a session (browser sign-in), then forwards. |
-| **S3** Signed in | The instance's own, verbatim. | The session's. | Forwarded. |
-| **S4** Bytebase, no catalog at this URL, signed out | Fixed: names the instance; it does not serve the public tool list here (a release before it, or a reverse proxy that forwards only `/mcp`); tools appear after the sign-in that opens in the browser. | Empty until the session opens, then the session's, announced with `tools/list_changed`. | Opens a session, then forwards. |
-| **S5** Unreachable, or not Bytebase | Fixed: names the URL and the reason. Unreachable gives the network error; not Bytebase says to check that the value is the instance's external URL. | Empty. | Tries to open a session; on failure, an error result with the reason. |
+| **S1** No URL configured | A one-line note (no Bytebase instance is connected; set `BYTEBASE_URL` to the instance's external URL in the client's config and restart), then the snapshot's instructions. | The snapshot's tools. | Error result with the same fix. Nothing is sent anywhere. |
+| **S2** Signed in | The instance's own, verbatim. | The session's, cursors passed through. | Forwarded. |
+| **S3** Bytebase, no session | Fixed: names the instance; tools appear after signing in to Bytebase in the browser. Plus the form sentence (D4). | Empty until the session opens, then the session's, announced with `tools/list_changed`. | Waits for the sign-in, then forwards. |
+| **S4** Unreachable, or not Bytebase | Fixed: names the URL and the reason. Unreachable gives the network error; not Bytebase says to check that the value is the instance's external URL. Plus the form sentence (D4). | Empty; when a retried opening succeeds, as in S3. | Tries to open a session; on failure, an error result with the reason. |
 
 Rules that hold in every state:
 
-1. Nothing the package sends a client describes a Bytebase tool unless it was read from a Bytebase
-   server in this process.
-2. A proxy with a URL contacts only that instance. A proxy without one contacts only Cloud's
-   catalog URL.
-3. While the proxy has no tool list (S1 when Cloud failed, S4, S5), it retries the catalog with
-   backoff, capped at 5 minutes, and sends `tools/list_changed` when it gets one. In S4 the session
-   that opens ends the retries.
+1. A configured proxy describes only tools it read from its instance in this process; the
+   snapshot is read only when no URL is configured.
+2. A proxy with a URL contacts only that instance. A proxy without one contacts nothing.
+3. Readers take every page: `sync-tools` and the proxy's own reads follow `nextCursor` to the end.
 4. Tool results, errors and elicitation requests from the instance pass through unchanged. The
-   package's own errors (S1, S5, failed sign-in) are tool results with `isError`, never JSON-RPC
-   errors, so the model can read the fix.
+   package's own errors on `tools/call` (S1, S4, failed sign-in) are tool results with `isError`,
+   never JSON-RPC errors, so the model can read the fix. A `tools/list` the proxy cannot answer
+   from a reopened session gets a JSON-RPC error carrying the reason.
 5. Elicitation is declared to the instance only if the client declared it; requests are forwarded
    with `server.elicitInput`.
 6. Diagnostics go to stderr; stdout is the transport.
 
-The resource-mismatch hint from the first version stays. If sign-in fails because the instance's
-protected-resource document names another URL, the error says that `BYTEBASE_URL` must be the
-instance's external URL, which is what tokens are bound to.
-
-## What gets deleted
-
-- `src/tools.json` and `src/tools.ts`: the bundle and its loader.
-- `scripts/sync-tools.mjs` and `scripts/render-readme.mjs`: the dump and the README tools table.
-  The README lists no tools; it links to Bytebase's MCP docs.
-- The copy of `tools.json` in `scripts/copy-assets.mjs`. The build still marks `dist/index.js`
-  executable.
-- `FALLBACK_INSTRUCTIONS` in `src/server.ts`: instructions come from Bytebase, apart from the package's state texts and its form sentence (D4).
-- The `login` and `whoami` commands (D6, D9).
-- The README's claim that Cursor and Claude Desktop only run local commands. Both connect to a
-  remote `/mcp` directly. The README says the package is for directories and for clients that only
-  start local commands, and tells everyone else to use `<external URL>/mcp`.
+If sign-in fails because the instance's protected-resource document names another URL, the error
+says that `BYTEBASE_URL` must be the instance's external URL, which is what tokens are bound to.
 
 ## Scope
 
-Two slices, in order, both in the pull request that carries this doc: each slice is its own commit
-series, reviewed and green before the next starts. Tests run against a fake upstream: a local HTTP
-server that serves a catalog, the protected-resource document, OAuth endpoints and an MCP
-endpoint built with the SDK's server. They do not use Cloud, which will not serve the route until
-the server change deploys.
+This pull request first carried revision 1 (a public catalog route): its design commit, a slice
+that read the catalog, and a slice that built sessions, sign-in, the token lock, identity,
+cancellation and the `status` and `logout` commands. That session code already does most of what
+D5–D7 and D9 describe, and its tests (`test/sessions.test.mjs`) stay green throughout. Revision 2
+lands as two more commit series on top, each green on its own, so `npm test` passes after each.
+Tests drive the built server over stdio against a fake Bytebase: a local HTTP server with the
+protected-resource document, an OAuth server and an MCP endpoint built with the SDK's server.
 
-1. **Catalog and states.** Delivers D1–D4 for the states that need no session (S1, S2's
-   instructions and list, S4's and S5's classification and texts), rules 1–4, D8, and the
-   deletions. Files: `src/catalog.ts` (new: fetch, validate, classify, retry), `src/server.ts`,
-   `src/config.ts`, `src/index.ts`, the files deleted above, `README.md`, `server.json`,
-   `package.json`, and tests in `test/` named by state. Depends on nothing in this repository; the
-   proxy is not published until Cloud serves the route.
-2. **Sessions.** Delivers S3 (session at initialize, instructions verbatim), S4's background
-   sign-in, D5, D6, D7 and D9. Files: `src/upstream.ts`, `src/auth.ts`, `src/index.ts`, tests for
-   each D7 rule (two processes refreshing, against a fake token endpoint that refuses a reused
-   refresh token; two processes signing in for the first time), D5's cancellation and resend
-   rules, identity (the registered `client_name` and the forwarded `clientInfo`), and the S3/S4 rows.
-   Depends on slice 1.
+1. **States and the snapshot.** Delivers D1–D4, D8, the states' instructions and lists (S1, S3,
+   S4; S2 keeps the existing session code), D5's sign-in after `initialized` for every configured
+   proxy without a session, rules 1–2, and the README. Removes `src/catalog.ts` and the catalog
+   paths in `src/server.ts` and `src/index.ts` (`status` stops reporting a catalog). Restores
+   `src/tools.ts`, `scripts/sync-tools.mjs` and `scripts/render-readme.mjs`, adds the build step
+   that copies the snapshot into `dist/`, and seeds `src/tools.json` from a current Bytebase build
+   with `sync-tools`, so S1 carries current instructions. Tests: `test/smoke.test.mjs` by state,
+   and the existing `test/sessions.test.mjs` updated where a state's name or `status`'s output
+   changed.
+2. **Pages and recovery.** Delivers the rest of D2 and D5 and rule 3: cursors passed through to the
+   session, every reader taking every page (`sync-tools` and the proxy's own reads), opening
+   retries with backoff when the instance cannot be reached, resending `tools/list` on a reopened
+   session, and the JSON-RPC error for a `tools/list` that cannot be answered. Files:
+   `src/upstream.ts`, `src/server.ts`, `scripts/sync-tools.mjs`, and `test/sessions.test.mjs`
+   (paging through a fake that pages, an expired session, an unreachable first start). Depends on
+   slice 1.
 
 ## Not in this change
 
-- Publishing to npm or the MCP registry, making the repository public, claiming the Glama
-  listing. The first publish waits until Cloud serves `/mcp/catalog`; before that, S1 lists no
-  tools and a directory would score zero.
+- Publishing to npm or the MCP registry, making the repository public, claiming the Glama listing.
 - Tool annotations on the server, which Glama's score and vendor preflights read. That is server
   work, and whether `query_database` gets static or mode-aware hints is still open.
-- Asking for the URL with elicitation (D1); a printed sign-in URL in tool results for headless
-  machines (the loopback redirect cannot reach a headless machine anyway).
-- An npm snippet on the console's MCP page, so users never type the URL. That is console work in
-  the main repository.
-- Showing the client application's name, not only its OAuth client ID, in the audit table. That
-  is server and console work in the main repository.
-- Windows, elicitation forwarding and refresh after expiry were never exercised. Slice 2 tests
-  refresh against the fake upstream; a manual Windows and elicitation run comes before 1.0.
+- Checking which clients honor `tools/list_changed`. On a configured user's first run the tools
+  arrive with it after sign-in; a client that ignores it shows them only after a restart, when the
+  stored sign-in makes S2 immediate. Verify Cursor and Claude Desktop before 1.0.
+- Asking for the URL with elicitation (D1); headless sign-in (the loopback redirect cannot reach a
+  headless machine anyway).
+- An npm snippet on the console's MCP page, and the client application's name in the audit table.
+  Both are work in the main repository.
+- Windows and elicitation forwarding were never exercised; a manual run comes before 1.0.
 
 ## Kept from the first version
 
 - No tool logic in the package; results pass through untouched.
+- The bundled `tools.json`, `sync-tools` and the README tools table, now for directory listings only.
 - OAuth, not a service-account token: `/mcp` accepts only its own OAuth tokens, bound to the
   external URL.
 - A fixed loopback port, because dynamic client registration stores the redirect URI with the
@@ -296,21 +284,21 @@ the server change deploys.
 
 | First version | This version | Why |
 | --- | --- | --- |
-| Bundled `tools.json` from 3.24.1 | No tool list; read from the instance's or Cloud's catalog | Drift (Problem) |
-| `tools/list` from the bundle, live list in the background | Catalog before a session, session after | One source per moment, both from Bytebase |
-| Fallback instructions in the package | Instructions from Bytebase; package text only for its own states and the copied form sentence | Principle |
+| Every client got the bundled list until a live list arrived | Only an unconfigured proxy uses the snapshot; a configured one lists only its instance's tools | Users never see drift (D2) |
+| Live list read once, first page only | Session's list with cursors passed through; every reader takes every page | Long lists and paging (D2, rule 3) |
+| Instructions from the bundle, or fallback text in the package | Signed in: the instance's own; otherwise package text for the state | D4 |
+| Background sign-in after the first `tools/list` | Sign-in after `initialized`, not restarted on its own after a failure | D5 |
 | One OAuth client, "Bytebase MCP (npm)" | One per (instance, client app) | Consent and audit show the real client (D6) |
-| Token file per host | Per (instance, client); every write under one lock | Path-based instances; single-use refresh tokens (D7) |
+| Token file per host, no lock | Per (instance, client); every write under one lock | Single-use refresh tokens, several processes (D7) |
+| Cancelled calls forwarded; replays on ambiguous errors | Never sent once cancelled; resent only when never received | D5 |
 | `login`, `whoami` | `status` | A sign-in needs a client (D6, D9) |
-| Release checklist ran `sync-tools` | Release is version bump and push | Nothing to sync (D8) |
+| README calls Cursor and Claude Desktop local-command-only | Both connect to remote `/mcp`; the package is for directories and local-command clients | Correctness |
 
 ## References
 
-- Companion doc: bytebase `docs/design/mcp-public-catalog.md`.
-- bytebase `backend/api/mcp/server.go`: `RegisterRoutes`, `authMiddleware`, `registerTools`,
-  `serverInstructions`, `askInChatInstructions`, `nameSignedInAccount`, `legacyProtocolCeiling`.
-- bytebase `backend/server/server_frontend_routes.go`: the HTML5 fallback behind D2's validity
-  check.
-- MCP Server Cards (SEP-2127, extension `modelcontextprotocol/ext-server-card`): reserves
-  `<streamable-http-url>/server-card` and leaves tool lists out, so a card cannot replace the
-  catalog.
+- bytebase `backend/api/mcp/server.go`: `authMiddleware`, `registerTools`, `askInChatWithoutForm`,
+  `nameSignedInAccount`, `legacyProtocolCeiling`.
+- bytebase/bytebase#22184 (closed): the public catalog route of approach C.
+- `mcp-remote` (geelen/mcp-remote) `src/proxy.ts`: sign in, then connect and pass through.
+- Glama listings of sign-in-first bridges (`abluva/mcp-remote` and others): listed, "Not graded"
+  quality, no tools.
