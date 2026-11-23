@@ -503,3 +503,22 @@ test("D5: a form Bytebase withdraws is taken down in the client", async (t) => {
   await new Promise((resolve) => setTimeout(resolve, 500));
   assert.ok(withdrawnAt !== undefined && withdrawnAt - shown < 5000, "the client was told to take the form down");
 });
+
+test("rule 4: a successful reauthorize gets a note to reconnect, and Bytebase's text is kept", async (t) => {
+  const bytebase = await startFakeBytebase({ reauthorizeTool: true });
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+  const proxy = await connect({ url: bytebase.url, home, port });
+  t.after(() => proxy.client.close());
+
+  const other = await proxy.client.callTool({ name: "get_schema", arguments: {} });
+  assert.equal(other.content.length, 1, "other results pass through unchanged");
+
+  const result = await proxy.client.callTool({ name: "reauthorize", arguments: {} });
+  assert.equal(result.content[0].text, "OAuth refresh grant revoked. Retry or reconnect this MCP server to run OAuth again.");
+  assert.equal(result.content.length, 2);
+  assert.match(result.content[1].text, /reconnect this MCP server/i);
+  assert.match(result.content[1].text, /sign/i);
+});
