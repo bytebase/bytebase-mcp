@@ -23,7 +23,7 @@ export const SESSION_INSTRUCTIONS = "In workspaces/ws-fake, this session acts as
  * Starts the fake. Without `resourceMetadata` it answers like a server that is
  * not Bytebase. `pageSize` makes tools/list page; `port` fixes the port.
  */
-export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0, port = 0, streamed = false } = {}) {
+export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0, port = 0, streamed = false, reauthorizeTool = false } = {}) {
   const sessions = new Map();
   const eventStreams = new Set();
   const requests = [];
@@ -166,6 +166,12 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
       }
       // Asks for confirmation with a form, as Bytebase's decide_issue does, and
       // waits up to Bytebase's confirmationLifetime (10 minutes) for the answer.
+      // Bytebase's account-switch tool: revokes the grant and says to retry or reconnect.
+      if (reauthorizeTool) mcp.registerTool("reauthorize", { description: "Log out the current MCP OAuth connection." }, async () => {
+        accessTokens.clear();
+        refreshTokens.clear();
+        return { content: [{ type: "text", text: "OAuth refresh grant revoked. Retry or reconnect this MCP server to run OAuth again." }] };
+      });
       if (streamed) mcp.registerTool("confirm_change", { description: "Asks the user to confirm." }, async (extra) => {
         const withdraw = new AbortController();
         if (state.withdrawFormAfterMs > 0) setTimeout(() => withdraw.abort(), state.withdrawFormAfterMs);

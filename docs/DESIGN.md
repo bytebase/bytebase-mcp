@@ -234,7 +234,10 @@ Rules that hold in every state:
 4. Tool results, errors and elicitation requests from the instance pass through unchanged. The
    package's own errors on `tools/call` (S1, S4, failed sign-in) are tool results with `isError`,
    never JSON-RPC errors, so the model can read the fix. A `tools/list` the proxy cannot answer
-   from a reopened session gets a JSON-RPC error carrying the reason.
+   from a reopened session gets a JSON-RPC error carrying the reason. The one addition to a
+   forwarded result: after a successful `reauthorize` (Bytebase's account-switch tool), the proxy
+   appends a note to reconnect this server. The client holds instructions naming the old account
+   until it reinitializes (D4), and reconnecting both opens the sign-in and refreshes them.
 5. Elicitation is declared to the instance only if the client declared it; requests are forwarded
    with `server.elicitInput`.
 6. Diagnostics go to stderr; stdout is the transport.
