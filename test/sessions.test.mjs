@@ -523,3 +523,19 @@ test("rule 4: a successful reauthorize gets a note to reconnect, and Bytebase's 
   assert.match(result.content[1].text, /previous account/i, "it says what reconnecting fixes");
   assert.doesNotMatch(result.content[1].text, /naming the account you sign in/i, "and promises no more than that");
 });
+
+test("rule 4: after a signed-out start, the reauthorize note does not claim an account was named", async (t) => {
+  const bytebase = await startFakeBytebase({ reauthorizeTool: true });
+  t.after(() => bytebase.close());
+  const proxy = await connect({ url: bytebase.url, home: freshHome(), port: nextPort++ });
+  t.after(() => proxy.client.close());
+  assert.match(proxy.client.getInstructions() ?? "", /sign in/i, "started signed out");
+  const announced = new Promise((resolve) => proxy.client.setNotificationHandler(ToolListChangedNotificationSchema, resolve));
+  await completeSignIn(await proxy.nextSignIn());
+  await announced;
+
+  const result = await proxy.client.callTool({ name: "reauthorize", arguments: {} });
+  assert.equal(result.content.length, 2);
+  assert.match(result.content[1].text, /reconnect this MCP server/i);
+  assert.doesNotMatch(result.content[1].text, /previous account/i, "these instructions never named an account");
+});
