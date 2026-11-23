@@ -102,15 +102,17 @@ export class Upstream {
    * request, such as a session it ended, it reopens with the stored sign-in and
    * asks once more.
    */
-  async listTools(cursor?: string): Promise<ListToolsResult> {
+  async listTools(cursor?: string, signal?: AbortSignal): Promise<ListToolsResult> {
     const send = async () => {
       const client = await this.open({ interactive: false, waitForLock: true });
-      return client.request({ method: "tools/list", params: cursor ? { cursor } : {} }, ListToolsResultSchema);
+      // A caller that gave up while the session reopened does not send the request.
+      signal?.throwIfAborted();
+      return client.request({ method: "tools/list", params: cursor ? { cursor } : {} }, ListToolsResultSchema, { signal });
     };
     try {
       return await send();
     } catch (err) {
-      if (!neverReceived(err)) throw err;
+      if (signal?.aborted || !neverReceived(err)) throw err;
       log(`the instance did not receive tools/list (${describe(err)}); reconnecting`);
       this.reset();
       return send();
