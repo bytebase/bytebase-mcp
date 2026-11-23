@@ -434,13 +434,17 @@ test("D5: a call in flight when the session is replaced still returns its result
   t.after(() => proxy.client.close());
   assert.equal((await proxy.client.callTool({ name: "get_schema", arguments: {} })).content[0].text, "ran get_schema");
 
-  bytebase.callDelayMs = 1500;
+  bytebase.callDelayMs = 4000;
   const accepted = proxy.client.callTool({ name: "query_database", arguments: {} });
   await new Promise((resolve) => setTimeout(resolve, 300)); // Bytebase has accepted it
   bytebase.revokeAllTokens();
   const next = proxy.client.callTool({ name: "get_schema", arguments: {} });
-  await completeSignIn(await proxy.nextSignIn());
+  const url = await proxy.nextSignIn();
+  // The old session's event stream reconnects meanwhile; it must not start a sign-in of its own.
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  await completeSignIn(url);
   assert.equal((await next).content[0].text, "ran get_schema");
+  assert.equal(proxy.signIns.length, 0, "the retired session started no second sign-in");
   const result = await accepted;
   assert.equal(result.isError, undefined, "the accepted call was not cut off");
   assert.equal(result.content[0].text, "ran query_database");
