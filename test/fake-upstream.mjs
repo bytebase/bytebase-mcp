@@ -6,7 +6,7 @@ import http from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 /** The tools the fake's MCP endpoint serves. */
 export const FAKE_TOOLS = {
@@ -35,7 +35,7 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
   const revocations = [];
   let refreshes = 0;
   let counter = 0;
-  const codes = new Set();
+  const codes = new Map();
   const accessTokens = new Set();
   const refreshTokens = new Set();
 
@@ -84,7 +84,7 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
     }
     if (req.method === "GET" && url.pathname === "/authorize") {
       const code = `code-${++counter}`;
-      codes.add(code);
+      codes.set(code, url.searchParams.get("code_challenge"));
       const redirect = new URL(url.searchParams.get("redirect_uri"));
       redirect.searchParams.set("code", code);
       redirect.searchParams.set("state", url.searchParams.get("state") ?? "");
@@ -103,7 +103,15 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
     }
     if (req.method === "POST" && url.pathname === "/token") {
       const form = new URLSearchParams(await readBody(req));
-      if (form.get("grant_type") === "authorization_code" && codes.delete(form.get("code"))) {
+      if (form.get("grant_type") === "authorization_code" && codes.has(form.get("code"))) {
+        // PKCE, as Bytebase checks it: the verifier must hash to the challenge sent at authorize.
+        const challenge = codes.get(form.get("code"));
+        codes.delete(form.get("code"));
+        const verifier = form.get("code_verifier") ?? "";
+        if (createHash("sha256").update(verifier).digest("base64url") !== challenge) {
+          json(res, 400, { error: "invalid_grant", error_description: "PKCE verification failed" });
+          return;
+        }
         json(res, 200, issue());
       } else if (form.get("grant_type") === "refresh_token") {
         refreshes++;
