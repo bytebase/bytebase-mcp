@@ -24,13 +24,17 @@ const RETRY_FIRST_MS = 1000;
 /** How long tools/list waits to reopen a dropped session before answering with an error. */
 const LIST_BOUND_MS = 10_000;
 
-/** Runs work with a deadline; on expiry it aborts the work's signal and rejects with reason. */
-async function withinBound<T>(work: (signal: AbortSignal) => Promise<T>, ms: number, reason: string): Promise<T> {
+/**
+ * Runs work with a deadline; on expiry it aborts the work's signal, calls
+ * onExpiry and rejects with reason.
+ */
+async function withinBound<T>(work: (signal: AbortSignal) => Promise<T>, ms: number, onExpiry: () => void, reason: string): Promise<T> {
   const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       controller.abort();
+      onExpiry();
       reject(new Error(reason));
     }, ms);
   });
@@ -135,6 +139,20 @@ export function createServer(config: Config): { server: Server; upstream: () => 
     void signInWhenReachable(config.url);
   };
 
+  let announcing = false;
+  /** After a tools/list gave up waiting, announces the list once the reopen it started opens. */
+  function announceWhenOpen(target: Upstream): void {
+    if (announcing) return;
+    announcing = true;
+    target
+      .open({ interactive: false, waitForLock: true })
+      .then(() => server.sendToolListChanged())
+      .catch((err) => log(`the session did not reopen: ${describe(err)}`))
+      .finally(() => {
+        announcing = false;
+      });
+  }
+
   /**
    * D5: an unreachable instance is retried with backoff, and the browser opens
    * only once it answers. A sign-in that fails or times out is not restarted.
@@ -164,7 +182,9 @@ export function createServer(config: Config): { server: Server; upstream: () => 
     const target = upstreamFor(config.url);
     if (!target.session && (target.signingIn || !target.provider.hasStoredSignIn())) return { tools: [] };
     try {
-      return await withinBound((signal) => target.listTools(request.params?.cursor, signal), LIST_BOUND_MS, `still connecting to ${config.url.toString().replace(/\/$/, "")}`);
+      return await withinBound((signal) => target.listTools(request.params?.cursor, signal), LIST_BOUND_MS,
+        // The reconnect carries on; when it opens, the client is told to list again.
+        () => announceWhenOpen(target), `still connecting to ${config.url.toString().replace(/\/$/, "")}`);
     } catch (err) {
       if (err instanceof McpError) throw err;
       // tools/list has no error result, so the reason goes in a JSON-RPC error (rule 4).
