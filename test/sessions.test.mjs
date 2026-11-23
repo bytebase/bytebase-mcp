@@ -387,3 +387,39 @@ test("D2: a slow tools/list on an open session is not announced as a changed lis
   await new Promise((resolve) => setTimeout(resolve, 1500));
   assert.equal(announcements, 0, "a slow answer on an open session changes nothing, so it is not announced");
 });
+
+test("D9: logout deletes the sign-ins even when revocation stalls", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  await signInOnce(bytebase, home, nextPort++);
+  bytebase.revokeStalls = true;
+  const { execFile } = await import("node:child_process");
+  const run = (command) =>
+    new Promise((resolve, reject) =>
+      execFile(process.execPath, [entry, command, "--url", bytebase.url], { env: { ...process.env, BYTEBASE_MCP_HOME: home }, timeout: 20000 }, (err, stdout) =>
+        err ? reject(err) : resolve(stdout),
+      ),
+    );
+  const started = Date.now();
+  await run("logout");
+  assert.ok(Date.now() - started < 15000, "logout did not wait on the stalled revocation");
+  assert.deepEqual(JSON.parse(await run("status")).signIns, []);
+});
+
+test("D5: after the grant is revoked mid-session (reauthorize), the next call signs in again", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+  const proxy = await connect({ url: bytebase.url, home, port });
+  t.after(() => proxy.client.close());
+  assert.equal((await proxy.client.callTool({ name: "get_schema", arguments: {} })).content[0].text, "ran get_schema");
+
+  bytebase.revokeAllTokens();
+  const call = proxy.client.callTool({ name: "query_database", arguments: {} });
+  await completeSignIn(await proxy.nextSignIn());
+  const result = await call;
+  assert.equal(result.content[0].text, "ran query_database", "the call ran after the new sign-in");
+});

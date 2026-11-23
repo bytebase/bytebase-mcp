@@ -179,8 +179,9 @@ inside that opening does not wait on itself, and work the opening starts but out
 event stream) takes the lock like anyone else. Concurrent refreshes in one process wait for each
 other as those of different processes do. A sign-in starts only while a session is being opened
 for D5's sign-in or a tool call. If the SDK tries to start one anywhere else, as it does after a
-refused refresh, the provider refuses it, the call fails with a sign-in-needed error, and the next
-tool call opens the session under the lock.
+refused refresh (a revoked grant, as after Bytebase's `reauthorize`), the provider refuses it; the
+instance answered 401, so the request never ran, and a tool call reopens the session with a sign-in
+under the lock and is then sent.
 
 **D8 · Versioning is independent of Bytebase.** The package has its own semver and works with any
 instance from 3.22, the first with MCP OAuth. The snapshot records the Bytebase version it was

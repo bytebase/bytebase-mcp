@@ -197,8 +197,13 @@ function findSignInRequired(err: unknown): SignInRequiredError | undefined {
   return undefined;
 }
 
-/** Errors that show the instance never received the request. */
+/**
+ * Errors that show the instance never received the request. A refused sign-in
+ * in an open session counts: Bytebase answered 401 (a revoked grant, as after
+ * reauthorize), so the request did not run.
+ */
 function neverReceived(err: unknown): boolean {
+  if (findSignInRequired(err)) return true;
   const text = describe(err).toLowerCase();
   return text.includes("econnrefused") || text.includes("session not found") || text.includes("http 404") || text.includes("http 401") || text.includes("not connected");
 }
