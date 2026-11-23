@@ -30,6 +30,7 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
   const registrations = [];
   const initializes = [];
   const toolCalls = [];
+  const toolLists = [];
   let refreshes = 0;
   let counter = 0;
   const codes = new Set();
@@ -114,6 +115,7 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
       for (const message of Array.isArray(body) ? body : body ? [body] : []) {
         if (message.method === "initialize") initializes.push(message.params);
         if (message.method === "tools/call") toolCalls.push(message.params);
+        if (message.method === "tools/list") toolLists.push(message.params);
       }
       const sessionId = req.headers["mcp-session-id"];
       if (sessionId) {
@@ -160,6 +162,7 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
     registrations,
     initializes,
     toolCalls,
+    toolLists,
     get refreshes() {
       return refreshes;
     },

@@ -24,13 +24,20 @@ const RETRY_FIRST_MS = 1000;
 /** How long tools/list waits to reopen a dropped session before answering with an error. */
 const LIST_BOUND_MS = 10_000;
 
-async function withinBound<T>(work: Promise<T>, ms: number, reason: string): Promise<T> {
+/** Runs work with a deadline; on expiry it aborts the work's signal and rejects with reason. */
+async function withinBound<T>(work: (signal: AbortSignal) => Promise<T>, ms: number, reason: string): Promise<T> {
+  const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(reason)), ms);
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(reason));
+    }, ms);
   });
+  const running = work(controller.signal);
+  running.catch(() => undefined);
   try {
-    return await Promise.race([work, timeout]);
+    return await Promise.race([running, timeout]);
   } finally {
     clearTimeout(timer);
   }
@@ -157,7 +164,7 @@ export function createServer(config: Config): { server: Server; upstream: () => 
     const target = upstreamFor(config.url);
     if (!target.session && (target.signingIn || !target.provider.hasStoredSignIn())) return { tools: [] };
     try {
-      return await withinBound(target.listTools(request.params?.cursor), LIST_BOUND_MS, `still connecting to ${config.url.toString().replace(/\/$/, "")}`);
+      return await withinBound((signal) => target.listTools(request.params?.cursor, signal), LIST_BOUND_MS, `still connecting to ${config.url.toString().replace(/\/$/, "")}`);
     } catch (err) {
       if (err instanceof McpError) throw err;
       // tools/list has no error result, so the reason goes in a JSON-RPC error (rule 4).
