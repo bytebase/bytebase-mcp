@@ -1,4 +1,4 @@
-// A fake Bytebase for tests: the public catalog, the protected-resource document,
+// A fake Bytebase for tests: the protected-resource document,
 // an OAuth server (registration, a browser leg that redirects at once, single-use
 // refresh tokens) and an MCP endpoint that requires its tokens. It records what
 // the proxy sent.
@@ -6,9 +6,8 @@ import http from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
-export const CATALOG = {
-  instructions: "Fake Bytebase routing instructions.",
-  instructionsWithoutForm: "Fake form paragraph: confirm writes in chat.",
+/** The tools the fake's MCP endpoint serves. */
+export const FAKE_TOOLS = {
   tools: [
     { name: "query_database", description: "Run a query.", inputSchema: { type: "object", properties: {} } },
     { name: "get_schema", description: "Read a schema.", inputSchema: { type: "object", properties: {} } },
@@ -19,12 +18,12 @@ export const CATALOG = {
 export const SESSION_INSTRUCTIONS = "In workspaces/ws-fake, this session acts as the Bytebase account dev@example.com.\n\nFake session instructions.";
 
 /**
- * Starts the fake. `catalog` is what GET /mcp/catalog answers: "json" (CATALOG),
- * "html" (the console page an instance without the route serves), or "none" (404).
+ * Starts the fake. Without `resourceMetadata` it answers like a server that is
+ * not Bytebase.
  */
-export async function startFakeBytebase({ catalog = "json", resourceMetadata = true } = {}) {
+export async function startFakeBytebase({ resourceMetadata = true } = {}) {
   const requests = [];
-  const state = { catalog, resourceMetadata };
+  const state = { resourceMetadata, refreshDelayMs: 0 };
   const registrations = [];
   const initializes = [];
   const toolCalls = [];
@@ -53,12 +52,6 @@ export async function startFakeBytebase({ catalog = "json", resourceMetadata = t
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     requests.push(`${req.method} ${url.pathname}`);
 
-    if (req.method === "GET" && url.pathname === "/mcp/catalog") {
-      if (state.catalog === "json") json(res, 200, CATALOG);
-      else if (state.catalog === "html") res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end("<!doctype html><html>console</html>");
-      else res.writeHead(404).end();
-      return;
-    }
     if (req.method === "GET" && url.pathname === "/.well-known/oauth-protected-resource/mcp" && state.resourceMetadata) {
       json(res, 200, { resource: `${base}/mcp`, authorization_servers: [base] });
       return;
@@ -97,6 +90,7 @@ export async function startFakeBytebase({ catalog = "json", resourceMetadata = t
         json(res, 200, issue());
       } else if (form.get("grant_type") === "refresh_token") {
         refreshes++;
+        if (state.refreshDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, state.refreshDelayMs));
         if (refreshTokens.delete(form.get("refresh_token"))) json(res, 200, issue());
         else json(res, 400, { error: "invalid_grant", error_description: "refresh token reused" });
       } else {
@@ -119,7 +113,7 @@ export async function startFakeBytebase({ catalog = "json", resourceMetadata = t
         if (message.method === "tools/call") toolCalls.push(message.params);
       }
       const mcp = new McpServer({ name: "fake-bytebase", version: "0.0.0" }, { instructions: SESSION_INSTRUCTIONS });
-      for (const tool of CATALOG.tools) {
+      for (const tool of FAKE_TOOLS.tools) {
         mcp.registerTool(tool.name, { description: tool.description }, async () => ({ content: [{ type: "text", text: `ran ${tool.name}` }] }));
       }
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
@@ -144,13 +138,18 @@ export async function startFakeBytebase({ catalog = "json", resourceMetadata = t
     get refreshes() {
       return refreshes;
     },
-    /** Changes what the catalog route answers from now on. */
-    setCatalog(next) {
-      state.catalog = next;
-    },
     /** Revokes every access token, so the next MCP request needs a refresh. */
     expireAccessTokens() {
       accessTokens.clear();
+    },
+    /** Revokes every token, so the next MCP request needs a new sign-in. */
+    revokeAllTokens() {
+      accessTokens.clear();
+      refreshTokens.clear();
+    },
+    /** Delays answers to refresh requests, as a slow instance would. */
+    set refreshDelayMs(ms) {
+      state.refreshDelayMs = ms;
     },
     close: () => {
       server.closeAllConnections?.();

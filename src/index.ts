@@ -4,8 +4,9 @@ import { log } from "./log.js";
 import { serveStdio } from "./server.js";
 import { describe } from "./upstream.js";
 import { instanceDir } from "./auth.js";
-import { catalogUrl, fetchCatalog } from "./catalog.js";
+import { probeInstance } from "./probe.js";
 import fs from "node:fs";
+import path from "node:path";
 import { PACKAGE_VERSION } from "./version.js";
 
 const HELP = `bytebase-mcp ${PACKAGE_VERSION}
@@ -77,13 +78,19 @@ async function main(): Promise<void> {
       log(`removed the sign-ins for ${config.url.toString().replace(/\/$/, "")} (${dir})`);
       return;
     case "status": {
-      const probe = await fetchCatalog(catalogUrl(config.url), AbortSignal.timeout(5000));
-      const signIns = fs.existsSync(dir) ? fs.readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -".json".length)) : [];
+      const probe = await probeInstance(config.url, AbortSignal.timeout(5000));
+      // A file left by an interrupted sign-in holds a registration but no tokens.
+      const signIns = fs.existsSync(dir)
+        ? fs
+            .readdirSync(dir)
+            .filter((name) => name.endsWith(".json") && hasTokens(path.join(dir, name)))
+            .map((name) => name.slice(0, -".json".length))
+        : [];
       process.stdout.write(
         `${JSON.stringify(
           {
             url: config.url.toString(),
-            catalog: probe.kind === "catalog" ? { tools: probe.catalog.tools.map((tool) => tool.name) } : { unavailable: probe.detail },
+            bytebase: probe.kind === "bytebase" ? true : { answer: probe.kind, detail: probe.detail },
             signIns,
             signInDirectory: dir,
           },
@@ -102,3 +109,11 @@ main().catch((err) => {
   log(describe(err));
   process.exit(1);
 });
+
+function hasTokens(file: string): boolean {
+  try {
+    return Boolean((JSON.parse(fs.readFileSync(file, "utf8")) as { tokens?: unknown }).tokens);
+  } catch {
+    return false;
+  }
+}

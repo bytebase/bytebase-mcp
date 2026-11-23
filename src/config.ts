@@ -1,12 +1,9 @@
 import os from "node:os";
 import path from "node:path";
-import { PUBLIC_CATALOG_URL } from "./catalog.js";
 
 export interface Config {
   /** Base URL of the Bytebase instance, or undefined when none is configured. */
   url?: URL;
-  /** The public catalog an unconfigured proxy lists (Bytebase Cloud's unless overridden for tests). */
-  publicCatalogUrl: URL;
   /** Directory holding the OAuth token files. */
   home: string;
   /** Loopback port that receives the OAuth redirect. */
@@ -62,6 +59,5 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, urlOverride?: s
   }
   const noBrowser = env.BYTEBASE_MCP_NO_BROWSER;
   const openBrowser = !(noBrowser && noBrowser !== "0" && noBrowser.toLowerCase() !== "false");
-  const publicCatalogUrl = new URL(env.BYTEBASE_MCP_PUBLIC_CATALOG_URL || PUBLIC_CATALOG_URL);
-  return { url, publicCatalogUrl, home, callbackPort, openBrowser };
+  return { url, home, callbackPort, openBrowser };
 }
