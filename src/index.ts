@@ -23,7 +23,7 @@ Usage:
 
 Environment:
   BYTEBASE_URL                 External URL of the Bytebase instance (required to call tools)
-  BYTEBASE_MCP_HOME            Sign-in directory (default ~/.config/bytebase-mcp)
+  BYTEBASE_MCP_HOME            Sign-in directory (default ~/.bytebase-mcp)
   BYTEBASE_MCP_CALLBACK_PORT   Loopback port for the OAuth redirect (default 51789)
   BYTEBASE_MCP_NO_BROWSER=1    Print the sign-in URL instead of opening a browser
 

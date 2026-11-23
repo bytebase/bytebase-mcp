@@ -27,7 +27,7 @@
         },
         {
           "name": "BYTEBASE_MCP_HOME",
-          "description": "Directory for the OAuth token files (default: ~/.config/bytebase-mcp)",
+          "description": "Directory for the OAuth sign-ins (default: ~/.bytebase-mcp)",
           "isRequired": false,
           "format": "string",
           "isSecret": false

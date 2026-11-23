@@ -14,10 +14,12 @@ export interface Config {
 
 export const DEFAULT_CALLBACK_PORT = 51789;
 
+/**
+ * Where sign-ins live. They are credentials, not configuration, so not under
+ * ~/.config, which people often sync or keep in dotfile repositories.
+ */
 export function defaultHome(): string {
-  const xdg = process.env.XDG_CONFIG_HOME;
-  const base = xdg && xdg.length > 0 ? xdg : path.join(os.homedir(), ".config");
-  return path.join(base, "bytebase-mcp");
+  return path.join(os.homedir(), ".bytebase-mcp");
 }
 
 /** Normalizes a user-supplied Bytebase URL: trims, drops a trailing slash and a trailing /mcp. */
