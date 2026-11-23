@@ -92,33 +92,7 @@ The design, with every state the server can be in, is in [docs/DESIGN.md](docs/D
 
 ## Development
 
-Design notes for reviewers and maintainers: [docs/DESIGN.md](docs/DESIGN.md).
-
-```bash
-npm install
-npm run build
-npm test                 # tests against a fake Bytebase; no instance needed
-```
-
-### Keeping the snapshot current
-
-`src/tools.json` is the tool list MCP directories see before an instance is configured; a configured server never reads it. Before a release, regenerate it from an instance on the target Bytebase release:
-
-```bash
-npm run build
-BYTEBASE_URL=https://your-bytebase npm run sync-tools
-```
-
-The script signs in like the package does, writes the snapshot and the README's tools table, and prints what changed.
-
-### Releasing
-
-```bash
-npm version patch        # bumps package.json and server.json together
-git push origin main --follow-tags
-```
-
-A push to `main` that changes `package.json` runs [`npm-publish.yml`](.github/workflows/npm-publish.yml): it publishes to npm with OIDC provenance, then registers the version in the [MCP Registry](https://registry.modelcontextprotocol.io) with `mcp-publisher`. No tokens are stored in the repository.
+Building, testing (against a local Bytebase and in a real client), keeping the tool snapshot current and releasing are covered in [CONTRIBUTING.md](CONTRIBUTING.md). The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## License
 
