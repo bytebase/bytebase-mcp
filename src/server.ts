@@ -136,9 +136,12 @@ export function createServer(config: Config): { server: Server; upstream: () => 
 
   server.setRequestHandler(ListToolsRequestSchema, async (request) => {
     if (!config.url) return { tools: loadBundledTools().tools };
-    if (!upstream?.session) return { tools: [] };
+    // Only a proxy that has never signed in lists nothing (D2); with a stored
+    // sign-in, a session dropped by an outage is reopened here (D5).
+    const target = upstreamFor(config.url);
+    if (!target.session && !target.provider.hasStoredSignIn()) return { tools: [] };
     try {
-      return await upstream.listTools(request.params?.cursor);
+      return await target.listTools(request.params?.cursor);
     } catch (err) {
       if (err instanceof McpError) throw err;
       // tools/list has no error result, so the reason goes in a JSON-RPC error (rule 4).
