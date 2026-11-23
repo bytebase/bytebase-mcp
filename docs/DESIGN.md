@@ -188,7 +188,10 @@ read from (`bytebaseVersion`); that only describes the directory listing. `serve
 following `package.json` (`scripts/sync-version.mjs`).
 
 **D9 · The commands are `serve`, `logout` and `status`.** `serve` (the default) is what clients
-run. `logout` deletes every sign-in stored for the instance. `status` prints the instance, whether
+run. `logout` revokes each refresh token stored for the instance at its revocation endpoint, so a
+copied file stops working too, then deletes the sign-in under its own lock; it is also how a user
+switches accounts (log out, reconnect, sign in as the other account). It does not sign anyone out
+of the Bytebase console. `status` prints the instance, whether
 it answers as Bytebase, and the stored sign-ins by client, without signing in. `login` goes (D6); `whoami` becomes `status`, which needs no session.
 
 ## States
