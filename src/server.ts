@@ -2,6 +2,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
+  ErrorCode,
   InitializeRequestSchema,
   ListToolsRequestSchema,
   McpError,
@@ -19,6 +20,13 @@ import { PACKAGE_VERSION } from "./version.js";
 
 /** How long initialize waits for a stored sign-in or the instance probe (docs/DESIGN.md, D4). */
 const INITIALIZE_BOUND_MS = 5000;
+const RETRY_FIRST_MS = 1000;
+const RETRY_CAP_MS = 5 * 60 * 1000;
+
+/** Network errors: the instance gave no answer at all. */
+function isUnreachable(err: unknown): boolean {
+  return /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|fetch failed/i.test(describe(err));
+}
 
 const NO_INSTANCE_NOTE =
   "No Bytebase instance is connected, so these tools cannot run yet. Set BYTEBASE_URL to your Bytebase external URL (for example https://bytebase.example.com) in the MCP server's environment and restart the server. See https://docs.bytebase.com/integrations/mcp";
@@ -103,13 +111,39 @@ export function createServer(config: Config): { server: Server; upstream: () => 
     initialized = true;
     // A configured proxy without a session has no tools to offer, so it signs in now (D5).
     if (!config.url || upstream?.session) return;
-    openAndAnnounce(config.url, true).catch((err) => log(`sign-in failed: ${describe(err)}`));
+    void signInWhenReachable(config.url);
   };
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
+  /**
+   * D5: an unreachable instance is retried with backoff, and the browser opens
+   * only once it answers. A sign-in that fails or times out is not restarted.
+   */
+  async function signInWhenReachable(url: URL): Promise<void> {
+    for (let delay = RETRY_FIRST_MS; ; delay = Math.min(delay * 2, RETRY_CAP_MS)) {
+      try {
+        await openAndAnnounce(url, true);
+        return;
+      } catch (err) {
+        if (!isUnreachable(err)) {
+          log(`sign-in failed: ${describe(err)}`);
+          return;
+        }
+        log(`${url.toString().replace(/\/$/, "")} cannot be reached (${describe(err)}); retrying in ${Math.round(delay / 1000)}s`);
+        await new Promise((resolve) => setTimeout(resolve, delay).unref());
+      }
+    }
+  }
+
+  server.setRequestHandler(ListToolsRequestSchema, async (request) => {
     if (!config.url) return { tools: loadBundledTools().tools };
     if (!upstream?.session) return { tools: [] };
-    return upstream.listTools();
+    try {
+      return await upstream.listTools(request.params?.cursor);
+    } catch (err) {
+      if (err instanceof McpError) throw err;
+      // tools/list has no error result, so the reason goes in a JSON-RPC error (rule 4).
+      throw new McpError(ErrorCode.InternalError, `Bytebase MCP: ${describe(err)}`);
+    }
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<CallToolResult> => {

@@ -5,6 +5,8 @@
 import http from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { randomUUID } from "node:crypto";
 
 /** The tools the fake's MCP endpoint serves. */
 export const FAKE_TOOLS = {
@@ -19,9 +21,10 @@ export const SESSION_INSTRUCTIONS = "In workspaces/ws-fake, this session acts as
 
 /**
  * Starts the fake. Without `resourceMetadata` it answers like a server that is
- * not Bytebase.
+ * not Bytebase. `pageSize` makes tools/list page; `port` fixes the port.
  */
-export async function startFakeBytebase({ resourceMetadata = true } = {}) {
+export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0, port = 0 } = {}) {
+  const sessions = new Map();
   const requests = [];
   const state = { resourceMetadata, refreshDelayMs: 0 };
   const registrations = [];
@@ -112,22 +115,44 @@ export async function startFakeBytebase({ resourceMetadata = true } = {}) {
         if (message.method === "initialize") initializes.push(message.params);
         if (message.method === "tools/call") toolCalls.push(message.params);
       }
+      const sessionId = req.headers["mcp-session-id"];
+      if (sessionId) {
+        const transport = sessions.get(sessionId);
+        if (!transport) {
+          json(res, 404, { jsonrpc: "2.0", id: null, error: { code: -32001, message: "Session not found" } });
+          return;
+        }
+        await transport.handleRequest(req, res, body);
+        return;
+      }
       const mcp = new McpServer({ name: "fake-bytebase", version: "0.0.0" }, { instructions: SESSION_INSTRUCTIONS });
       for (const tool of FAKE_TOOLS.tools) {
         mcp.registerTool(tool.name, { description: tool.description }, async () => ({ content: [{ type: "text", text: `ran ${tool.name}` }] }));
       }
-      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-      res.on("close", () => {
-        void transport.close();
-        void mcp.close();
+      if (pageSize > 0) {
+        // Pages the list like a server with a small page size; the cursor is an offset.
+        mcp.server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+          const offset = Number(request.params?.cursor ?? 0);
+          const tools = FAKE_TOOLS.tools.slice(offset, offset + pageSize).map((tool) => ({ ...tool }));
+          const next = offset + pageSize;
+          return next < FAKE_TOOLS.tools.length ? { tools, nextCursor: String(next) } : { tools };
+        });
+      }
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        enableJsonResponse: true,
+        onsessioninitialized: (id) => sessions.set(id, transport),
       });
+      transport.onclose = () => {
+        if (transport.sessionId) sessions.delete(transport.sessionId);
+      };
       await mcp.connect(transport);
       await transport.handleRequest(req, res, body);
       return;
     }
     res.writeHead(404).end();
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   return {
     url: base,
@@ -141,6 +166,10 @@ export async function startFakeBytebase({ resourceMetadata = true } = {}) {
     /** Revokes every access token, so the next MCP request needs a refresh. */
     expireAccessTokens() {
       accessTokens.clear();
+    },
+    /** Forgets every MCP session, as Bytebase does after an hour idle. */
+    expireSessions() {
+      sessions.clear();
     },
     /** Revokes every token, so the next MCP request needs a new sign-in. */
     revokeAllTokens() {
