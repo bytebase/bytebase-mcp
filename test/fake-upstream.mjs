@@ -31,6 +31,7 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
   const initializes = [];
   const toolCalls = [];
   const toolLists = [];
+  const revocations = [];
   let refreshes = 0;
   let counter = 0;
   const codes = new Set();
@@ -66,6 +67,7 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
         authorization_endpoint: `${base}/authorize`,
         token_endpoint: `${base}/token`,
         registration_endpoint: `${base}/register`,
+        revocation_endpoint: `${base}/revoke`,
         response_types_supported: ["code"],
         grant_types_supported: ["authorization_code", "refresh_token"],
         code_challenge_methods_supported: ["S256"],
@@ -86,6 +88,13 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
       redirect.searchParams.set("code", code);
       redirect.searchParams.set("state", url.searchParams.get("state") ?? "");
       res.writeHead(302, { Location: redirect.toString() }).end();
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/revoke") {
+      const form = new URLSearchParams(await readBody(req));
+      revocations.push({ token: form.get("token"), clientId: form.get("client_id") });
+      refreshTokens.delete(form.get("token"));
+      res.writeHead(200).end();
       return;
     }
     if (req.method === "POST" && url.pathname === "/token") {
@@ -166,6 +175,7 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
     initializes,
     toolCalls,
     toolLists,
+    revocations,
     get refreshes() {
       return refreshes;
     },

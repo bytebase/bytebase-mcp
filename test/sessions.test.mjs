@@ -193,8 +193,14 @@ test("D9: status shows the stored sign-ins without signing in, and logout forget
   const status = JSON.parse(await run("status"));
   assert.deepEqual(status.signIns, ["sessions-client"]);
   assert.equal(status.bytebase, true);
+  const stored = JSON.parse(fs.readFileSync(path.join(status.signInDirectory, "sessions-client.json"), "utf8"));
   await run("logout");
   assert.deepEqual(JSON.parse(await run("status")).signIns, []);
+  assert.deepEqual(
+    bytebase.revocations,
+    [{ token: stored.tokens.refresh_token, clientId: stored.clientInformation.client_id }],
+    "logout revokes the refresh token at Bytebase before deleting it",
+  );
 });
 
 test("D5: a stored sign-in refused after the initialize bound still leads to a browser sign-in", async (t) => {

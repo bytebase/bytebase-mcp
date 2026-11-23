@@ -5,6 +5,9 @@ import { serveStdio } from "./server.js";
 import { describe } from "./upstream.js";
 import { instanceDir } from "./auth.js";
 import { probeInstance } from "./probe.js";
+import { discoverOAuthServerInfo } from "@modelcontextprotocol/sdk/client/auth.js";
+import { FileLock } from "./lock.js";
+import { mcpEndpoint } from "./config.js";
 import fs from "node:fs";
 import path from "node:path";
 import { PACKAGE_VERSION } from "./version.js";
@@ -74,8 +77,7 @@ async function main(): Promise<void> {
   const dir = instanceDir(config.home, config.url);
   switch (command) {
     case "logout":
-      fs.rmSync(dir, { recursive: true, force: true });
-      log(`removed the sign-ins for ${config.url.toString().replace(/\/$/, "")} (${dir})`);
+      await logout(config.url, dir);
       return;
     case "status": {
       const probe = await probeInstance(config.url, AbortSignal.timeout(5000));
@@ -115,5 +117,53 @@ function hasTokens(file: string): boolean {
     return Boolean((JSON.parse(fs.readFileSync(file, "utf8")) as { tokens?: unknown }).tokens);
   } catch {
     return false;
+  }
+}
+
+/**
+ * Forgets every sign-in stored for the instance. Each refresh token is revoked
+ * at the instance first, so a copy of the file stops working too; a sign-in is
+ * removed under its own lock, so it never races a refresh.
+ */
+async function logout(instanceUrl: URL, dir: string): Promise<void> {
+  const instance = instanceUrl.toString().replace(/\/$/, "");
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((name) => name.endsWith(".json")) : [];
+  let revocationEndpoint: string | undefined;
+  try {
+    const info = await discoverOAuthServerInfo(mcpEndpoint(instanceUrl));
+    revocationEndpoint = (info.authorizationServerMetadata as { revocation_endpoint?: string } | undefined)?.revocation_endpoint;
+  } catch (err) {
+    log(`cannot reach ${instance} to revoke (${describe(err)}); the stored sign-ins are deleted and expire there on their own`);
+  }
+  for (const name of files) {
+    const file = path.join(dir, name);
+    const release = await new FileLock(file).acquire({ wait: true });
+    try {
+      const stored = readStored(file);
+      const token = stored.tokens?.refresh_token;
+      const clientId = stored.clientInformation?.client_id;
+      if (revocationEndpoint && token && clientId) {
+        const response = await fetch(revocationEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ token, token_type_hint: "refresh_token", client_id: clientId }),
+        }).catch((err: unknown) => err as Error);
+        if (response instanceof Error || !response.ok) {
+          log(`could not revoke ${name.slice(0, -".json".length)} at ${instance}; it expires there on its own`);
+        }
+      }
+      fs.rmSync(file, { force: true });
+    } finally {
+      release?.();
+    }
+  }
+  log(`removed ${files.length} sign-in(s) for ${instance} (${dir})`);
+}
+
+function readStored(file: string): { tokens?: { refresh_token?: string }; clientInformation?: { client_id?: string } } {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8")) as ReturnType<typeof readStored>;
+  } catch {
+    return {};
   }
 }
