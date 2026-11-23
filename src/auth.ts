@@ -374,6 +374,11 @@ function refreshTokenIn(init: RequestInit | undefined): string | undefined {
 }
 
 function openInBrowser(url: string): void {
+  // The URL comes from the instance's OAuth metadata; only a web page is handed to the OS.
+  if (!/^https?:$/.test(new URL(url).protocol)) {
+    log("the sign-in URL is not http(s); not opening it in a browser");
+    return;
+  }
   let command: string;
   let args: string[];
   switch (process.platform) {
