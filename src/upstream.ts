@@ -66,6 +66,11 @@ export class Upstream {
     return this.client;
   }
 
+  /** Whether an opening that may sign in in the browser is in progress. */
+  get signingIn(): boolean {
+    return Boolean(this.connecting) && this.connectingInteractive;
+  }
+
   /** Returns the session, opening it under the sign-in's lock when needed. */
   async open(options: OpenOptions): Promise<Client> {
     if (this.client) return this.client;

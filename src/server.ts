@@ -21,6 +21,20 @@ import { PACKAGE_VERSION } from "./version.js";
 /** How long initialize waits for a stored sign-in or the instance probe (docs/DESIGN.md, D4). */
 const INITIALIZE_BOUND_MS = 5000;
 const RETRY_FIRST_MS = 1000;
+/** How long tools/list waits to reopen a dropped session before answering with an error. */
+const LIST_BOUND_MS = 10_000;
+
+async function withinBound<T>(work: Promise<T>, ms: number, reason: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(reason)), ms);
+  });
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const RETRY_CAP_MS = 5 * 60 * 1000;
 
 /** Network errors: the instance gave no answer at all. */
@@ -136,12 +150,14 @@ export function createServer(config: Config): { server: Server; upstream: () => 
 
   server.setRequestHandler(ListToolsRequestSchema, async (request) => {
     if (!config.url) return { tools: loadBundledTools().tools };
-    // Only a proxy that has never signed in lists nothing (D2); with a stored
-    // sign-in, a session dropped by an outage is reopened here (D5).
+    // Without a session there is nothing to list yet (D2), and tools/list never
+    // waits on a sign-in: the tools are announced when the session opens. With
+    // a stored sign-in and no sign-in under way, a session dropped by an outage
+    // is reopened here (D5), within a bound.
     const target = upstreamFor(config.url);
-    if (!target.session && !target.provider.hasStoredSignIn()) return { tools: [] };
+    if (!target.session && (target.signingIn || !target.provider.hasStoredSignIn())) return { tools: [] };
     try {
-      return await target.listTools(request.params?.cursor);
+      return await withinBound(target.listTools(request.params?.cursor), LIST_BOUND_MS, `still connecting to ${config.url.toString().replace(/\/$/, "")}`);
     } catch (err) {
       if (err instanceof McpError) throw err;
       // tools/list has no error result, so the reason goes in a JSON-RPC error (rule 4).

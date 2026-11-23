@@ -308,3 +308,53 @@ test("D5: after an outage, tools/list reopens the session with the stored sign-i
   assert.deepEqual((await proxy.client.listTools()).tools.map((tool) => tool.name), ["query_database", "get_schema"]);
   assert.equal(proxy.signIns.length, 0, "no new sign-in");
 });
+
+test("D2: tools/list never waits on a sign-in in progress", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+
+  // Another live process holds this sign-in's lock, so the proxy's opening waits.
+  const instance = new URL(bytebase.url);
+  const lock = path.join(home, `${instance.hostname}_${instance.port}`, "sessions-client.json.lock");
+  fs.mkdirSync(lock);
+  fs.writeFileSync(path.join(lock, "pid"), String(process.pid));
+  const proxy = await connect({ url: bytebase.url, home, port });
+  t.after(() => proxy.client.close());
+
+  const started = Date.now();
+  assert.deepEqual((await proxy.client.listTools()).tools, [], "no session yet, so nothing to list");
+  assert.ok(Date.now() - started < 3000, "answered without waiting for the opening");
+
+  const announced = new Promise((resolve) => proxy.client.setNotificationHandler(ToolListChangedNotificationSchema, resolve));
+  fs.rmSync(lock, { recursive: true, force: true });
+  await announced;
+  assert.equal((await proxy.client.listTools()).tools.length, 2);
+});
+
+test("D5: a reopen held up by another process's lock answers within the bound", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+  const proxy = await connect({ url: bytebase.url, home, port });
+  t.after(() => proxy.client.close());
+  assert.equal((await proxy.client.listTools()).tools.length, 2);
+
+  await bytebase.goDown();
+  await proxy.client.callTool({ name: "query_database", arguments: {} });
+  await bytebase.comeBack();
+  const instance = new URL(bytebase.url);
+  const lock = path.join(home, `${instance.hostname}_${instance.port}`, "sessions-client.json.lock");
+  fs.mkdirSync(lock);
+  fs.writeFileSync(path.join(lock, "pid"), String(process.pid));
+
+  const started = Date.now();
+  await assert.rejects(proxy.client.listTools(), /still connecting/);
+  assert.ok(Date.now() - started < 15000, "bounded, not waiting on the lock");
+  fs.rmSync(lock, { recursive: true, force: true });
+  assert.equal((await proxy.client.listTools()).tools.length, 2);
+});
