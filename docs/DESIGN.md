@@ -236,10 +236,10 @@ Rules that hold in every state:
    never JSON-RPC errors, so the model can read the fix. A `tools/list` the proxy cannot answer
    from a reopened session gets a JSON-RPC error carrying the reason. The one addition to a
    forwarded result: after a successful `reauthorize` (Bytebase's account-switch tool), the proxy
-   appends a note to reconnect this server. The client holds instructions naming the old account
-   until it reinitializes (D4). Reconnecting starts it signed out, so the old account's name is
-   gone, and opens the sign-in; the new account is named only from the next start, as after any
-   signed-out start.
+   appends a note to reconnect this server and sign in as the account wanted. When the session
+   started signed in (S2), the client's instructions name the old account until it reinitializes
+   (D4), and the note says so; after a signed-out start they named none, and it does not.
+   Reconnecting starts signed out, so the new account is named only from the start after that.
 5. Elicitation is declared to the instance only if the client declared it; requests are forwarded
    with `server.elicitInput`.
 6. Diagnostics go to stderr; stdout is the transport.
