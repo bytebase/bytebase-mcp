@@ -56,8 +56,6 @@ const NO_INSTANCE_NOTE =
   "No Bytebase instance is connected, so these tools cannot run yet. Set BYTEBASE_URL to your Bytebase external URL (for example https://bytebase.example.com) in the MCP server's environment and restart the server. See https://docs.bytebase.com/integrations/mcp";
 
 const REAUTHORIZE_NOTE = "Through bytebase-mcp, reconnect this MCP server in your client and sign in as the account you want.";
-/** Only true when the session started signed in (S2): then the instructions carried Bytebase's account line. */
-const REAUTHORIZE_STALE_ACCOUNT = "Until you reconnect, the instructions this client holds still name the previous account.";
 
 /** The package's version of the instance's form paragraph, for states where that text cannot be read. */
 const FORM_SENTENCE =
@@ -96,8 +94,6 @@ export function createServer(config: Config): { server: Server; upstream: () => 
   // client on this SDK would keep the first withdrawn form up (D5).
   (server as unknown as { _requestMessageId: number })._requestMessageId = 1;
   let initialized = false;
-  /** Whether the client's instructions came from a session, and so name its account (D4). */
-  let instructionsNameAccount = false;
 
   // Created at initialize: a sign-in belongs to the client application (D6).
   let upstream: Upstream | undefined;
@@ -136,10 +132,7 @@ export function createServer(config: Config): { server: Server; upstream: () => 
       const opening = target.open({ interactive: false, waitForLock: false });
       const timeout = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), INITIALIZE_BOUND_MS).unref());
       const session = await Promise.race([opening.catch((err) => log(`starting signed out: ${describe(err)}`)), timeout]);
-      if (session) {
-        instructionsNameAccount = true;
-        return { ...result, instructions: session.getInstructions() ?? "" };
-      }
+      if (session) return { ...result, instructions: session.getInstructions() ?? "" };
     }
     const probe = await probing;
     return { ...result, instructions: signedOutInstructions(config.url.toString().replace(/\/$/, ""), probe, request.params.capabilities) };
@@ -229,8 +222,7 @@ export function createServer(config: Config): { server: Server; upstream: () => 
       // The one addition to a forwarded result (rule 4): the client keeps
       // instructions naming the old account until it reinitializes.
       if (request.params.name === "reauthorize" && !result.isError) {
-        const note = instructionsNameAccount ? `${REAUTHORIZE_NOTE} ${REAUTHORIZE_STALE_ACCOUNT}` : REAUTHORIZE_NOTE;
-        return { ...result, content: [...result.content, { type: "text", text: note }] };
+        return { ...result, content: [...result.content, { type: "text", text: REAUTHORIZE_NOTE }] };
       }
       return result;
     } catch (err) {
