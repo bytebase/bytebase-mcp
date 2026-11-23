@@ -289,3 +289,22 @@ test("D5: an instance unreachable at startup is retried, then signs in and annou
   await announced;
   assert.deepEqual((await proxy.client.listTools()).tools.map((tool) => tool.name), ["query_database", "get_schema"]);
 });
+
+test("D5: after an outage, tools/list reopens the session with the stored sign-in", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const home = freshHome();
+  const port = nextPort++;
+  await signInOnce(bytebase, home, port);
+
+  const proxy = await connect({ url: bytebase.url, home, port });
+  t.after(() => proxy.client.close());
+  assert.equal((await proxy.client.listTools()).tools.length, 2);
+  await bytebase.goDown();
+  const failed = await proxy.client.callTool({ name: "query_database", arguments: {} });
+  assert.equal(failed.isError, true, "a call during the outage fails and drops the session");
+  await assert.rejects(proxy.client.listTools(), "during the outage the client gets an error, not an empty list");
+  await bytebase.comeBack();
+  assert.deepEqual((await proxy.client.listTools()).tools.map((tool) => tool.name), ["query_database", "get_schema"]);
+  assert.equal(proxy.signIns.length, 0, "no new sign-in");
+});

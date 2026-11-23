@@ -167,6 +167,15 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
     expireAccessTokens() {
       accessTokens.clear();
     },
+    /** Stops listening, like an outage: connections are refused; tokens survive. */
+    goDown() {
+      server.closeAllConnections?.();
+      return new Promise((resolve) => server.close(resolve));
+    },
+    /** Listens again on the same port after goDown. */
+    comeBack() {
+      return new Promise((resolve) => server.listen(Number(new URL(base).port), "127.0.0.1", resolve));
+    },
     /** Forgets every MCP session, as Bytebase does after an hour idle. */
     expireSessions() {
       sessions.clear();
