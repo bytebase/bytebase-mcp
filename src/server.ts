@@ -181,10 +181,15 @@ export function createServer(config: Config): { server: Server; upstream: () => 
     // is reopened here (D5), within a bound.
     const target = upstreamFor(config.url);
     if (!target.session && (target.signingIn || !target.provider.hasStoredSignIn())) return { tools: [] };
+    // Only a wait spent reopening a dropped session ends in an announcement; a
+    // slow answer on an open session changes nothing the client holds.
+    const reopening = !target.session;
     try {
       return await withinBound((signal) => target.listTools(request.params?.cursor, signal), LIST_BOUND_MS,
         // The reconnect carries on; when it opens, the client is told to list again.
-        () => announceWhenOpen(target), `still connecting to ${config.url.toString().replace(/\/$/, "")}`);
+        () => {
+          if (reopening) announceWhenOpen(target);
+        }, `still connecting to ${config.url.toString().replace(/\/$/, "")}`);
     } catch (err) {
       if (err instanceof McpError) throw err;
       // tools/list has no error result, so the reason goes in a JSON-RPC error (rule 4).
