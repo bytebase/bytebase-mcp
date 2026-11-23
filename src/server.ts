@@ -56,7 +56,7 @@ const NO_INSTANCE_NOTE =
   "No Bytebase instance is connected, so these tools cannot run yet. Set BYTEBASE_URL to your Bytebase external URL (for example https://bytebase.example.com) in the MCP server's environment and restart the server. See https://docs.bytebase.com/integrations/mcp";
 
 const REAUTHORIZE_NOTE =
-  "Through bytebase-mcp, reconnect this MCP server in your client to finish switching accounts: it opens the Bytebase sign-in, and the client then gets instructions naming the account you sign in as.";
+  "Through bytebase-mcp, reconnect this MCP server in your client and sign in as the account you want. Until you reconnect, the instructions this client holds still name the previous account.";
 
 /** The package's version of the instance's form paragraph, for states where that text cannot be read. */
 const FORM_SENTENCE =
