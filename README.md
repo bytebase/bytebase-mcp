@@ -29,7 +29,7 @@ Bytebase serves MCP over HTTP at `<your Bytebase URL>/mcp`. A client can connect
 Connecting directly is the shorter path when it works. Use this package when:
 
 - **Your client only starts local MCP servers.**
-- **Your Bytebase instance is on a private network.** Some clients connect to remote servers from the vendor's cloud, not from your machine, so an instance behind a VPN or firewall is out of their reach. Claude's custom connectors [work this way](https://support.claude.com/en/articles/11175166-getting-started-with-custom-connectors-using-remote-mcp). This package runs on your machine and reaches whatever your machine can.
+- **Your instance is on a private network, or on your own machine, and your client connects from the cloud.** A client that connects from your machine, such as Claude Code, reaches a local or private instance directly and does not need this. Claude Desktop and claude.ai do not: their custom connectors [connect from Anthropic's cloud](https://support.claude.com/en/articles/11175166-getting-started-with-custom-connectors-using-remote-mcp), so an instance on `localhost` or behind a VPN or firewall is out of their reach. This package runs on your machine and reaches whatever your machine can.
 - **The client cannot complete the sign-in with your instance.**
 - **You are installing from an MCP directory** that lists servers by package.
 
