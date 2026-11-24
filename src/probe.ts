@@ -5,8 +5,13 @@ export type InstanceProbe =
   | { kind: "bytebase" }
   /** The server answered, with anything but Bytebase's document for this URL. */
   | { kind: "not-bytebase"; detail: string }
-  /** No answer: network error or timeout. */
+  /** No answer (network error or timeout), or a gateway's 502, 503 or 504. */
   | { kind: "unreachable"; detail: string };
+
+/** A reverse proxy's answer while the Bytebase behind it is down or restarting (docs/DESIGN.md, States). */
+export function isGatewayStatus(status: unknown): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
 
 /**
  * Asks GET <base>/.well-known/oauth-protected-resource/mcp. A Bytebase instance
@@ -24,7 +29,8 @@ export async function probeInstance(base: URL, signal?: AbortSignal): Promise<In
   }
   if (!response.ok) {
     await response.body?.cancel();
-    return { kind: "not-bytebase", detail: `HTTP ${response.status} for ${url.pathname}` };
+    const detail = `HTTP ${response.status} for ${url.pathname}`;
+    return isGatewayStatus(response.status) ? { kind: "unreachable", detail } : { kind: "not-bytebase", detail };
   }
   try {
     const body = (await response.json()) as { resource?: unknown };

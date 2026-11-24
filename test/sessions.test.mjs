@@ -297,6 +297,34 @@ test("D5: an instance unreachable at startup is retried, then signs in and annou
   assert.deepEqual((await proxy.client.listTools()).tools.map((tool) => tool.name), ["query_database", "get_schema"]);
 });
 
+test("States: a gateway's 502, 503 or 504 at startup reads as unreachable, not as a wrong URL", async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  for (const status of [502, 503, 504]) {
+    bytebase.gatewayStatus = status;
+    const proxy = await connect({ url: bytebase.url, home: freshHome(), port: nextPort++ });
+    const instructions = proxy.client.getInstructions() ?? "";
+    await proxy.client.close();
+    assert.match(instructions, new RegExp(`could not be reached \\(HTTP ${status}`), `${status}: ${instructions}`);
+  }
+});
+
+test("D5: a first run behind a gateway answering 503 is retried, then signs in and announces its tools", { timeout: 30_000 }, async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  bytebase.gatewayStatus = 503;
+  const proxy = await connect({ url: bytebase.url, home: freshHome(), port: nextPort++ });
+  t.after(() => proxy.client.close());
+  // Long enough for the first opening to fail, so the session comes from a retry.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+
+  bytebase.gatewayStatus = 0;
+  const announced = new Promise((resolve) => proxy.client.setNotificationHandler(ToolListChangedNotificationSchema, resolve));
+  await completeSignIn(await proxy.nextSignIn());
+  await announced;
+  assert.deepEqual((await proxy.client.listTools()).tools.map((tool) => tool.name), ["query_database", "get_schema"]);
+});
+
 test("D5: after an outage, tools/list reopens the session with the stored sign-in", async (t) => {
   const bytebase = await startFakeBytebase();
   t.after(() => bytebase.close());

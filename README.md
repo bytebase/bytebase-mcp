@@ -15,7 +15,7 @@ The package contains no Bytebase logic. Once you sign in, it lists your instance
 ## Requirements
 
 - A Bytebase instance, 3.22 or later, with its [external URL](https://docs.bytebase.com/get-started/self-host/external-url) configured and the workspace MCP access policy not set to **Disabled**.
-- Node.js 20 or later.
+- Node.js 20 or later, on macOS or Linux. Windows has not been tested yet. If your browser does not open at sign-in there, find the sign-in URL in the server's output (your client's MCP log) and open it yourself.
 - A Bytebase account. The package signs you in through Bytebase's own OAuth; it never sees your password.
 
 ## Setup
@@ -62,7 +62,7 @@ Every command takes `--url <bytebase-url>` in place of `BYTEBASE_URL`.
 Once you sign in, the tools are the ones your instance serves, so an older or newer Bytebase shows its own. The table below is a snapshot, the list MCP directories see before any instance is configured:
 
 <!-- tools:start -->
-Generated from Bytebase main at 9daf6b307f (2026-11-22).
+Generated from Bytebase 3.25.0.
 
 | Tool | Purpose |
 | --- | --- |

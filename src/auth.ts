@@ -8,6 +8,7 @@ import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { Implementation } from "@modelcontextprotocol/sdk/types.js";
+import { browserCommand } from "./browser.js";
 import { FileLock } from "./lock.js";
 import { log } from "./log.js";
 
@@ -374,28 +375,13 @@ function refreshTokenIn(init: RequestInit | undefined): string | undefined {
 }
 
 function openInBrowser(url: string): void {
-  // The URL comes from the instance's OAuth metadata; only a web page is handed to the OS.
-  if (!/^https?:$/.test(new URL(url).protocol)) {
+  const opener = browserCommand(url, process.platform);
+  if (!opener) {
     log("the sign-in URL is not http(s); not opening it in a browser");
     return;
   }
-  let command: string;
-  let args: string[];
-  switch (process.platform) {
-    case "darwin":
-      command = "open";
-      args = [url];
-      break;
-    case "win32":
-      command = "cmd";
-      args = ["/c", "start", "", url.replace(/&/g, "^&")];
-      break;
-    default:
-      command = "xdg-open";
-      args = [url];
-  }
   try {
-    const child = spawn(command, args, { stdio: "ignore", detached: true });
+    const child = spawn(opener.command, opener.args, { stdio: "ignore", detached: true });
     child.on("error", () => undefined);
     child.unref();
   } catch {

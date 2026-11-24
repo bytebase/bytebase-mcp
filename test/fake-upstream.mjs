@@ -27,7 +27,7 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
   const sessions = new Map();
   const eventStreams = new Set();
   const requests = [];
-  const state = { resourceMetadata, refreshDelayMs: 0, listDelayMs: 0, callDelayMs: 0, revokeStalls: false, withdrawFormAfterMs: 0 };
+  const state = { resourceMetadata, refreshDelayMs: 0, listDelayMs: 0, callDelayMs: 0, revokeStalls: false, withdrawFormAfterMs: 0, gatewayStatus: 0 };
   const registrations = [];
   const initializes = [];
   const toolCalls = [];
@@ -57,6 +57,10 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     requests.push(`${req.method} ${url.pathname}`);
+    if (state.gatewayStatus) {
+      res.writeHead(state.gatewayStatus, { "Content-Type": "text/html" }).end("<html><body>Bad Gateway</body></html>");
+      return;
+    }
 
     if (req.method === "GET" && url.pathname === "/.well-known/oauth-protected-resource/mcp" && state.resourceMetadata) {
       json(res, 200, { resource: `${base}/mcp`, authorization_servers: [base] });
@@ -258,6 +262,10 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
     /** Withdraws each confirmation form this long after sending it, as Bytebase can. */
     set withdrawFormAfterMs(ms) {
       state.withdrawFormAfterMs = ms;
+    },
+    /** Answers every request with this status, as a reverse proxy does while Bytebase is down; 0 stops. */
+    set gatewayStatus(status) {
+      state.gatewayStatus = status;
     },
     /** Makes the revocation endpoint accept requests and never answer. */
     set revokeStalls(value) {
