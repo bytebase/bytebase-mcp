@@ -29,78 +29,40 @@ Bytebase serves MCP over HTTP at `<your Bytebase URL>/mcp`. A client can connect
 Connecting directly is the shorter path when it works. Use this package when:
 
 - **Your client only starts local MCP servers.**
-- **Your instance is on a private network, or on your own machine, and your client connects from the cloud.** A client that connects from your machine, such as Claude Code, reaches a local or private instance directly and does not need this. Claude Desktop and claude.ai do not: their custom connectors [connect from Anthropic's cloud](https://support.claude.com/en/articles/11175166-getting-started-with-custom-connectors-using-remote-mcp), so an instance on `localhost` or behind a VPN or firewall is out of their reach. This package runs on your machine and reaches whatever your machine can.
+- **Your client connects from the cloud and your instance is private.** Claude Desktop and claude.ai reach remote servers [from Anthropic's cloud](https://support.claude.com/en/articles/11175166-getting-started-with-custom-connectors-using-remote-mcp), so an instance on `localhost` or behind a VPN or firewall is out of their reach. A client that connects from your machine, such as Claude Code, does not have this limit.
 - **The client cannot complete the sign-in with your instance.**
 - **You are installing from an MCP directory** that lists servers by package.
 
 ## What you can do
 
-Two things bound what the assistant can do: the MCP access policy an admin sets for the workspace (**Read-only** or **Read-write**), and your own Bytebase permissions. Below are three flows in pictures, then the full list.
+Two things bound what the assistant can do: the MCP access policy an admin sets for the workspace, and your own Bytebase permissions. This is what each policy allows in Bytebase 3.25, condensed from the list the console shows on its MCP Integration page.
 
-### Database change
+| Policy | Capability | Includes |
+| --- | --- | --- |
+| Read-only | Read schemas and metadata | Schemas, databases and instances, projects, changelogs, SQL review configs |
+| Read-only | Read data by running queries | Read-only queries, as far as the engine can show a statement is a read. Masked columns come back masked |
+| Read-only | Read the change workflow | Issues, plans and plan checks, rollouts and their logs, releases |
+| Read-only | Read members, roles and policies | Roles and groups, masking rules and exemptions, approval rules, access grants |
+| Read-write | Propose changes | Create plans and issues and run plan checks. The project's approval policy decides whether a change needs approval |
+| Read-write | Request just-in-time access | A time-boxed grant to run one specific read statement. It starts only once approved, and ends on its own |
+| Read-write | Grant or revoke masking exemptions | For a database, a schema, a table or a column, with an optional expiry |
+| Read-write | Approve or reject issues | The approval rules and the project's self-approval setting apply, as in the console |
+| Read-write | Run rollouts and tasks | Create a rollout, then run, skip or cancel its tasks, under the project's approval policy |
+| Read-write | Run DML and DDL statements | Through queries, as far as the engine and your own permissions allow. Where your client supports confirmations, you confirm each one first |
+| Read-write | Export query results | Export results as files |
+| Read-write | Administer the workspace | Add a PostgreSQL instance to a project, create a CI identity for GitOps, manage approval rules for database changes, set masking rules |
 
-Describe the change in the chat. Bytebase turns it into a plan and an issue and runs the plan checks. The project's approval policy decides whether it needs approval, the same as a change raised in the console. Needs the Read-write policy.
-
-![You ask to add a phone column to the customer table. The assistant calls propose_database_change. Bytebase creates a plan and an issue, runs checks, and waits for approval before rollout.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-change.svg)
-
-### Access control
-
-The assistant signs in as you, through Bytebase, and never holds a database password. Two controls apply to what it reads.
-
-**Dynamic data masking.** It reaches the databases your account can reach, and the columns your project masks come back masked.
-
-![You ask which customers signed up last week. The assistant calls query_database. Bytebase checks access, masks the email column, logs the query and returns the rows.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-query.svg)
-
-**Just-in-time access.** When it needs to read something your account cannot, it requests a time-boxed grant to run one specific read statement. The grant starts only once it is approved, and ends on its own. Needs the Read-write policy and a project that allows access grants.
-
-![You ask to look at one order in production. The assistant calls request_access_grant. Once the request is approved, Bytebase allows that statement for a limited window, after which there is no access.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-access.svg)
-
-The images illustrate the flow. What you see depends on your instance's policies.
-
-### The full list
-
-This is what each policy allows in Bytebase 3.25, condensed from the list the console shows. The MCP Integration page in your Bytebase console shows the list for your version.
-
-**Read-only allows**
-
-| Capability | Includes |
-| --- | --- |
-| Read schemas and metadata | Schemas, databases and instances, projects and database groups, changelogs, SQL review configs |
-| Read data by running queries | Read-only queries, as far as the engine can show a statement is a read. Your own query history, saved queries you have access to |
-| Read the change workflow | Issues and comments, plans and plan checks, rollouts and their logs, releases |
-| Read members, roles and policies | Roles and groups, masking rules and exemptions, approval rules, access grants |
-
-**Read-write adds**
-
-| Capability | Includes |
-| --- | --- |
-| Propose changes | Create and edit plans and issues, run plan checks and reviews, generate schema diffs |
-| Request access grants | A time-boxed grant to run a specific read statement, optionally with results unmasked or exported |
-| Grant or revoke masking exemptions | For a database, a schema, a table or a column, with an optional expiry |
-| Approve or reject issues | The approval rules and the project's self-approval setting apply, as in the console |
-| Run rollouts and tasks | Create a rollout, then run, skip or cancel its tasks, under the project's approval policy |
-| Run DML and DDL statements | Through queries, as far as the engine and your own permissions allow. Where your client supports confirmations, a statement that is not a read runs only after you confirm it |
-| Export query results | Export results as files |
-| Administer the workspace | Add a PostgreSQL instance to a project, create a CI identity for GitOps, manage the approval rules for database changes, set masking rules |
-| Housekeeping | Sync instances and databases, manage saved queries |
-
-Approvals, masking exemptions and administration changes are each confirmed in your MCP client before they are made.
+Read-write includes everything under Read-only. Approvals, masking exemptions and administration changes are each confirmed in your MCP client before they are made.
 
 **Never, in any mode:** raise this policy, create a service account key, change a person's password, email or MFA, show a stored secret, open an Admin mode session, or read anyone else's query history.
 
-The tools behind these are listed under [Tools](#tools).
-
 ## Why go through Bytebase
 
-Bytebase sits between your users, people and AI agents alike, and your databases.
+The assistant works inside the same rules as everyone else on the instance:
 
-![Bytebase as one control plane between people, AI agents and applications on one side and your databases on the other](https://raw.githubusercontent.com/bytebase/bytebase/main/docs/assets/middleware.svg)
-
-An assistant connected through this package works inside the same rules as everyone else on the instance:
-
-- **Change management**: a change the assistant proposes becomes a plan and an issue in Bytebase. Plan checks run on it, and approval and rollout follow the project's policy.
-- **Access control**: the assistant acts as the account that signed in and can do only what that account can. An admin sets the ceiling for every MCP session in the workspace: Disabled, Read-only or Read-write. Queries return data with the project's masking applied, and the assistant can request time-boxed access instead of holding standing permissions.
-- **Compliance**: what the assistant does is recorded in Bytebase's audit log, as it is for the console.
+- **Change management**: a change it proposes becomes a plan and an issue, with plan checks, approval and rollout under the project's policy.
+- **Access control**: it signs in as you and never holds a database password. It can do only what your account can, masked data stays masked, and it requests time-boxed access instead of holding standing permissions.
+- **Compliance**: what it does is recorded in Bytebase's audit log.
 
 Bytebase supports PostgreSQL, MySQL, SQL Server, Oracle, MongoDB and [more](https://docs.bytebase.com/introduction/supported-databases).
 
@@ -172,16 +134,6 @@ Generated from Bytebase 3.25.0.
 | `search_api` | Discover Bytebase API endpoints. |
 | `set_just_in_time_access` | Turn just-in-time access on or off for one Bytebase project. |
 <!-- tools:end -->
-
-## Bytebase MCP or DBHub?
-
-| | Bytebase MCP | [DBHub](https://github.com/bytebase/dbhub) |
-| --- | --- | --- |
-| Connects to | Your Bytebase instance | Databases directly, with a connection string |
-| Needs Bytebase | Yes | No |
-| Sign-in | Your Bytebase account, through OAuth | Database credentials |
-| Changes | Proposed as plans and issues under the project's approval policy. Direct writes only where the workspace policy and your permissions allow | Run on the database directly; a read-only mode is available |
-| Best for | Teams that govern database access and changes | Local development and lightweight read access |
 
 ## How it works
 
