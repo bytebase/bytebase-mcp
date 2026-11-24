@@ -3,6 +3,8 @@
 [![npm](https://img.shields.io/npm/v/@bytebase/bytebase-mcp)](https://www.npmjs.com/package/@bytebase/bytebase-mcp)
 [![Bytebase MCP server](https://glama.ai/mcp/servers/bytebase/bytebase-mcp/badges/score.svg)](https://glama.ai/mcp/servers/bytebase/bytebase-mcp)
 
+**Let AI assistants work with your databases under the same review, access control and audit as your team.**
+
 > [!NOTE]
 > Bytebase MCP works with a [Bytebase](https://github.com/bytebase/bytebase) instance and does nothing without one. If you want a standalone database MCP server that connects straight to a database, see [DBHub](https://github.com/bytebase/dbhub).
 
@@ -28,11 +30,30 @@ An assistant connected through this package works inside the same rules as every
 
 Bytebase supports PostgreSQL, MySQL, SQL Server, Oracle, MongoDB and [more](https://docs.bytebase.com/introduction/supported-databases).
 
-## Use cases
+## What you can do
 
-- **Explore and query**: read a database's schema and run SQL without handing the assistant a database password.
-- **Propose a change**: draft a migration in the chat and send it into your team's review flow.
-- **Ask for access**: request permission to run one read-only statement for a limited time.
+### Query data without handing out a database password
+
+The assistant signs in as you, through Bytebase. It reaches the databases your account can reach, and the columns your project masks come back masked.
+
+![You ask which customers signed up last week. The assistant calls query_database. Bytebase checks access, masks the email column, logs the query and returns the rows.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-query.svg)
+
+### Send a change into review
+
+Describe the change in the chat. Bytebase turns it into a plan and an issue and runs the plan checks. Approval and rollout follow the project's policy.
+
+![You ask to add a phone column to the customer table. The assistant calls propose_database_change. Bytebase creates a plan and an issue, runs checks, and waits for approval before rollout.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-change.svg)
+
+### Get access for a limited time
+
+When the assistant needs to read something your account cannot, it requests a grant to run one read-only statement on one database. The grant ends on its own.
+
+![You ask to look at one order in production. The assistant calls request_access_grant. Bytebase grants access for a limited window, after which there is no access.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-access.svg)
+
+The images illustrate the flow. What you see depends on your instance's policies.
+
+### And more
+
 - **Review**: approve or reject an issue waiting at your approval step.
 - **Administer**: manage masking exemptions and just-in-time access for a project, or call any other Bytebase API operation.
 
