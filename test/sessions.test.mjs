@@ -325,6 +325,23 @@ test("D5: a first run behind a gateway answering 503 is retried, then signs in a
   assert.deepEqual((await proxy.client.listTools()).tools.map((tool) => tool.name), ["query_database", "get_schema"]);
 });
 
+test("D5: a first run whose OAuth discovery gets a gateway's 503 is retried, then signs in", { timeout: 30_000 }, async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  bytebase.gatewayPath = "/.well-known/oauth-authorization-server";
+  bytebase.gatewayStatus = 503;
+  const proxy = await connect({ url: bytebase.url, home: freshHome(), port: nextPort++ });
+  t.after(() => proxy.client.close());
+  // Long enough for the first opening to fail, so the session comes from a retry.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+
+  bytebase.gatewayStatus = 0;
+  const announced = new Promise((resolve) => proxy.client.setNotificationHandler(ToolListChangedNotificationSchema, resolve));
+  await completeSignIn(await proxy.nextSignIn());
+  await announced;
+  assert.deepEqual((await proxy.client.listTools()).tools.map((tool) => tool.name), ["query_database", "get_schema"]);
+});
+
 test("D5: after an outage, tools/list reopens the session with the stored sign-in", async (t) => {
   const bytebase = await startFakeBytebase();
   t.after(() => bytebase.close());
