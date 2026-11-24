@@ -26,6 +26,8 @@ Most MCP clients do not. Bytebase already serves MCP over HTTP, so check how you
 | Only starts MCP servers as local commands | This package |
 | An MCP directory that lists servers by package | This package |
 
+The package also works in clients that support HTTP. It reaches the same server, so use it there only when the direct connection is not an option.
+
 ## What you can do
 
 Three examples of what an assistant can do through Bytebase. They are not the full list: the assistant can use every tool your instance serves, listed under [Tools](#tools).
