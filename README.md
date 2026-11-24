@@ -6,7 +6,7 @@
 **Let AI assistants work with your databases under the same review, access control and audit as your team.**
 
 > [!NOTE]
-> Bytebase MCP works with a [Bytebase](https://github.com/bytebase/bytebase) instance and does nothing without one. If you want a standalone database MCP server that connects straight to a database, see [DBHub](https://github.com/bytebase/dbhub).
+> Bytebase MCP needs a running [Bytebase](https://github.com/bytebase/bytebase) instance, either Bytebase Cloud or self-hosted. It does nothing without one. If you want a standalone database MCP server that connects straight to a database, see [DBHub](https://github.com/bytebase/dbhub).
 
 The official npm package for the MCP server built into [Bytebase](https://github.com/bytebase/bytebase), the open-source database governance platform. It lets AI assistants that can only run MCP servers as local commands use your Bytebase instance: query data, inspect schemas, and propose database changes, all under Bytebase's approvals, access control, data masking, and audit logging.
 
@@ -32,6 +32,8 @@ Bytebase supports PostgreSQL, MySQL, SQL Server, Oracle, MongoDB and [more](http
 
 ## What you can do
 
+Three examples of what an assistant can do through Bytebase. They are not the full list: the assistant can use every tool your instance serves, listed under [Tools](#tools).
+
 ### Query data without handing out a database password
 
 The assistant signs in as you, through Bytebase. It reaches the databases your account can reach, and the columns your project masks come back masked.
@@ -54,6 +56,8 @@ The images illustrate the flow. What you see depends on your instance's policies
 
 ### And more
 
+A few of the other things the tools cover:
+
 - **Review**: approve or reject an issue waiting at your approval step.
 - **Administer**: manage masking exemptions and just-in-time access for a project, or call any other Bytebase API operation.
 
@@ -69,9 +73,7 @@ The images illustrate the flow. What you see depends on your instance's policies
 
 ## Requirements
 
-No Bytebase instance yet? See [self-host or cloud](https://docs.bytebase.com/get-started/self-host-vs-cloud) to start one.
-
-- A [Bytebase](https://github.com/bytebase/bytebase) instance, 3.22 or later, with its [external URL](https://docs.bytebase.com/get-started/self-host/external-url) configured and the workspace MCP access policy not set to **Disabled**.
+- A running [Bytebase](https://github.com/bytebase/bytebase) instance, 3.22 or later, on Bytebase Cloud or self-hosted. No instance yet? See [self-host or cloud](https://docs.bytebase.com/get-started/self-host-vs-cloud) to start one. The instance needs its [external URL](https://docs.bytebase.com/get-started/self-host/external-url) configured and the workspace MCP access policy not set to **Disabled**.
 - Node.js 20 or later, on macOS or Linux. Windows has not been tested yet. If your browser does not open at sign-in there, find the sign-in URL in the server's output (your client's MCP log) and open it yourself.
 - A Bytebase account. The package signs you in through Bytebase's own OAuth; it never sees your password.
 
