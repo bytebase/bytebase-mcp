@@ -12,21 +12,26 @@
 
 The official npm package for the MCP server built into [Bytebase](https://github.com/bytebase/bytebase), the open-source database governance platform. AI assistants query data, inspect schemas and propose database changes through your Bytebase instance, under its approvals, access control, data masking and audit logging.
 
-![Two ways into the MCP server built into Bytebase: HTTP clients connect straight to it, stdio-only clients go through this package, and Bytebase applies approval, access control, masking and audit in front of your databases](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/architecture.svg)
+![Two ways into the MCP server built into Bytebase: a client connects straight to it or runs this package locally, and Bytebase applies approval, access control, masking and audit in front of your databases](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/architecture.svg)
 
 The package contains no Bytebase logic. Once you sign in, it lists your instance's own tools and forwards every call to the instance, where permissions, the workspace MCP access policy, approvals and audit apply exactly as in the console. Nothing is stored locally except the OAuth token.
 
-## Do you need this package?
+## Two ways to connect
 
-Most MCP clients do not. Bytebase already serves MCP over HTTP, so check how your client connects:
+Bytebase serves MCP over HTTP at `<your Bytebase URL>/mcp`. A client can connect to it directly, or run this package on your machine and let it forward. Both reach the same server, with the same tools and the same permissions.
 
-| Your MCP client | What to use |
-| --- | --- |
-| Connects to remote MCP servers over HTTP. Claude Code, Claude Desktop, Cursor, Codex, Copilot CLI, Gemini CLI and VS Code all do. | No package. Point the client at `<your Bytebase URL>/mcp`. See the [MCP integration docs](https://docs.bytebase.com/integrations/mcp). |
-| Only starts MCP servers as local commands | This package |
-| An MCP directory that lists servers by package | This package |
+| | Connect directly | Use this package |
+| --- | --- | --- |
+| How | Add `<your Bytebase URL>/mcp` as a remote MCP server. See the [MCP integration docs](https://docs.bytebase.com/integrations/mcp). | Add the `npx` command under [Setup](#setup). |
+| Works with | Clients that connect to remote MCP servers over HTTP. Claude Code, Claude Desktop, Cursor, Codex, Copilot CLI, Gemini CLI and VS Code all do. | Any client that can start an MCP server as a local command |
+| On your machine | Nothing to install | Node.js, and a small local process that signs in through your browser |
 
-The package also works in clients that support HTTP. It reaches the same server, so use it there only when the direct connection is not an option.
+Connecting directly is the shorter path when it works. Use this package when:
+
+- **Your client only starts local MCP servers.**
+- **Your Bytebase instance is on a private network.** Some clients connect to remote servers from the vendor's cloud, not from your machine, so an instance behind a VPN or firewall is out of their reach. Claude's custom connectors [work this way](https://support.claude.com/en/articles/11175166-getting-started-with-custom-connectors-using-remote-mcp). This package runs on your machine and reaches whatever your machine can.
+- **The client cannot complete the sign-in with your instance.**
+- **You are installing from an MCP directory** that lists servers by package.
 
 ## What you can do
 
