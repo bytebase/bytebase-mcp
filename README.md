@@ -59,14 +59,14 @@ The images illustrate the flow. What you see depends on your instance's policies
 
 ### The full list
 
-This is what each policy allows in Bytebase 3.25, in the product's own words. The MCP Integration page in your Bytebase console shows the list for your version.
+This is what each policy allows in Bytebase 3.25, condensed from the list the console shows. The MCP Integration page in your Bytebase console shows the list for your version.
 
 **Read-only allows**
 
 | Capability | Includes |
 | --- | --- |
 | Read schemas and metadata | Schemas, databases and instances, projects and database groups, changelogs, SQL review configs |
-| Read data by running queries | Read-only queries, your own query history, saved queries you have access to |
+| Read data by running queries | Read-only queries, as far as the engine can show a statement is a read. Your own query history, saved queries you have access to |
 | Read the change workflow | Issues and comments, plans and plan checks, rollouts and their logs, releases |
 | Read members, roles and policies | Roles and groups, masking rules and exemptions, approval rules, access grants |
 
@@ -79,7 +79,7 @@ This is what each policy allows in Bytebase 3.25, in the product's own words. Th
 | Grant or revoke masking exemptions | For a database, a schema, a table or a column, with an optional expiry |
 | Approve or reject issues | The approval rules and the project's self-approval setting apply, as in the console |
 | Run rollouts and tasks | Create a rollout, then run, skip or cancel its tasks, under the project's approval policy |
-| Run DML and DDL statements | Through queries, as far as the engine and your own permissions allow |
+| Run DML and DDL statements | Through queries, as far as the engine and your own permissions allow. Where your client supports confirmations, a statement that is not a read runs only after you confirm it |
 | Export query results | Export results as files |
 | Administer the workspace | Add a PostgreSQL instance to a project, create a CI identity for GitOps, manage the approval rules for database changes, set masking rules |
 | Housekeeping | Sync instances and databases, manage saved queries |
