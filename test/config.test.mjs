@@ -33,3 +33,13 @@ test("loadConfig keeps sign-ins in ~/.bytebase-mcp, not under XDG config", async
   assert.equal(loadConfig({ XDG_CONFIG_HOME: "/tmp/xdg" }).home, path.join(os.homedir(), ".bytebase-mcp"));
   assert.equal(loadConfig({ BYTEBASE_MCP_HOME: "/tmp/elsewhere" }).home, "/tmp/elsewhere");
 });
+
+test("server.json fits the MCP Registry schema's length limits", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const server = JSON.parse(await readFile(new URL("../server.json", import.meta.url), "utf8"));
+  // maxLength in https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json (ServerDetail).
+  const limits = { name: 200, title: 100, description: 100, version: 255 };
+  for (const [field, max] of Object.entries(limits)) {
+    assert.ok(server[field].length <= max, `${field} is ${server[field].length} characters; the registry allows ${max}`);
+  }
+});

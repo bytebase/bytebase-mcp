@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.bytebase/bytebase-mcp",
   "title": "Bytebase",
-  "description": "Query, inspect, and change databases through Bytebase's governed workflow: approvals, access control, data masking, and audit logging stay on your Bytebase instance.",
+  "description": "Query, inspect, and change databases through Bytebase, under its approvals, masking, and audit.",
   "repository": {
     "url": "https://github.com/bytebase/bytebase-mcp",
     "source": "github"
