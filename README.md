@@ -8,12 +8,7 @@
 
 The official npm package for the MCP server built into [Bytebase](https://github.com/bytebase/bytebase), the open-source database governance platform. It lets AI assistants that can only run MCP servers as local commands use your Bytebase instance: query data, inspect schemas, and propose database changes, all under Bytebase's approvals, access control, data masking, and audit logging.
 
-```
-  MCP client (HTTP)  --------------------------------+
-                                                     v
-  MCP client (stdio only)  -->  bytebase-mcp  -->  Bytebase /mcp  -->  your databases
-                                this package       your instance
-```
+![Two ways into the MCP server built into Bytebase: HTTP clients connect straight to it, stdio-only clients go through this package, and Bytebase applies approval, access control, masking and audit in front of your databases](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/architecture.svg)
 
 The package contains no Bytebase logic. Once you sign in, it lists your instance's own tools and forwards every call to the instance, where permissions, the workspace MCP access policy, approvals and audit apply exactly as in the console. Nothing is stored locally except the OAuth token.
 
@@ -21,7 +16,11 @@ The package contains no Bytebase logic. Once you sign in, it lists your instance
 
 ## What you get from Bytebase
 
-Bytebase sits between your users, people and AI agents alike, and your databases. An assistant connected through this package works inside the same rules as everyone else on the instance:
+Bytebase sits between your users, people and AI agents alike, and your databases.
+
+![Bytebase as one control plane between people, AI agents and applications on one side and your databases on the other](https://raw.githubusercontent.com/bytebase/bytebase/main/docs/assets/middleware.svg)
+
+An assistant connected through this package works inside the same rules as everyone else on the instance:
 
 - **Change management**: a change the assistant proposes becomes a plan and an issue in Bytebase. Plan checks run on it, and approval and rollout follow the project's policy.
 - **Access control**: the assistant acts as the account that signed in and can do only what that account can. Queries return data with the project's masking applied, and it can request time-boxed access instead of holding standing permissions.
