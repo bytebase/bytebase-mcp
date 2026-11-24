@@ -35,11 +35,11 @@ Connecting directly is the shorter path when it works. Use this package when:
 
 ## What you can do
 
-The assistant can use every tool your Bytebase instance serves. They fall into three areas: database change, access control, and configuration. The images below show two of them in action, and the table after them covers the rest.
+Two things bound what the assistant can do: the MCP access policy an admin sets for the workspace (**Read-only** or **Read-write**), and your own Bytebase permissions. Below are three flows in pictures, then the full list.
 
 ### Database change
 
-Describe the change in the chat. Bytebase turns it into a plan and an issue and runs the plan checks. Approval and rollout follow the project's policy, the same as a change raised in the console.
+Describe the change in the chat. Bytebase turns it into a plan and an issue and runs the plan checks. The project's approval policy decides whether it needs approval, the same as a change raised in the console. Needs the Read-write policy.
 
 ![You ask to add a phone column to the customer table. The assistant calls propose_database_change. Bytebase creates a plan and an issue, runs checks, and waits for approval before rollout.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-change.svg)
 
@@ -51,21 +51,44 @@ The assistant signs in as you, through Bytebase, and never holds a database pass
 
 ![You ask which customers signed up last week. The assistant calls query_database. Bytebase checks access, masks the email column, logs the query and returns the rows.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-query.svg)
 
-**Just-in-time access.** When it needs to read something your account cannot, it requests a grant to run one read-only statement on one database. The grant ends on its own.
+**Just-in-time access.** When it needs to read something your account cannot, it requests a time-boxed grant to run one specific read statement. The grant starts only once it is approved, and ends on its own. Needs the Read-write policy and a project that allows access grants.
 
-![You ask to look at one order in production. The assistant calls request_access_grant. Bytebase grants access for a limited window, after which there is no access.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-access.svg)
+![You ask to look at one order in production. The assistant calls request_access_grant. Once the request is approved, Bytebase allows that statement for a limited window, after which there is no access.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-access.svg)
 
 The images illustrate the flow. What you see depends on your instance's policies.
 
-### Everything it covers
+### The full list
 
-| Area | What the assistant can do |
+This is what each policy allows in Bytebase 3.25, in the product's own words. The MCP Integration page in your Bytebase console shows the list for your version.
+
+**Read-only allows**
+
+| Capability | Includes |
 | --- | --- |
-| Database change | Propose schema and data changes. Approve or reject an issue at your approval step. Inspect a database's schema. Get the workflow files that set up GitOps for a project. |
-| Access control | Query with masking applied. Request time-boxed access. Turn just-in-time access on or off for a project. Grant or revoke a member's masking exemption. |
-| Configuration | Make a workspace administration change, which you confirm in your client first. Find and call any other Bytebase API operation. |
+| Read schemas and metadata | Schemas, databases and instances, projects and database groups, changelogs, SQL review configs |
+| Read data by running queries | Read-only queries, your own query history, saved queries you have access to |
+| Read the change workflow | Issues and comments, plans and plan checks, rollouts and their logs, releases |
+| Read members, roles and policies | Roles and groups, masking rules and exemptions, approval rules, access grants |
 
-The exact tools are listed under [Tools](#tools).
+**Read-write adds**
+
+| Capability | Includes |
+| --- | --- |
+| Propose changes | Create and edit plans and issues, run plan checks and reviews, generate schema diffs |
+| Request access grants | A time-boxed grant to run a specific read statement, optionally with results unmasked or exported |
+| Grant or revoke masking exemptions | For a database, a schema, a table or a column, with an optional expiry |
+| Approve or reject issues | The approval rules and the project's self-approval setting apply, as in the console |
+| Run rollouts and tasks | Create a rollout, then run, skip or cancel its tasks, under the project's approval policy |
+| Run DML and DDL statements | Through queries, as far as the engine and your own permissions allow |
+| Export query results | Export results as files |
+| Administer the workspace | Add a PostgreSQL instance to a project, create a CI identity for GitOps, manage the approval rules for database changes, set masking rules |
+| Housekeeping | Sync instances and databases, manage saved queries |
+
+Approvals, masking exemptions and administration changes are each confirmed in your MCP client before they are made.
+
+**Never, in any mode:** raise this policy, create a service account key, change a person's password, email or MFA, show a stored secret, open an Admin mode session, or read anyone else's query history.
+
+The tools behind these are listed under [Tools](#tools).
 
 ## Why go through Bytebase
 
@@ -76,7 +99,7 @@ Bytebase sits between your users, people and AI agents alike, and your databases
 An assistant connected through this package works inside the same rules as everyone else on the instance:
 
 - **Change management**: a change the assistant proposes becomes a plan and an issue in Bytebase. Plan checks run on it, and approval and rollout follow the project's policy.
-- **Access control**: the assistant acts as the account that signed in and can do only what that account can. Queries return data with the project's masking applied, and it can request time-boxed access instead of holding standing permissions.
+- **Access control**: the assistant acts as the account that signed in and can do only what that account can. An admin sets the ceiling for every MCP session in the workspace: Disabled, Read-only or Read-write. Queries return data with the project's masking applied, and the assistant can request time-boxed access instead of holding standing permissions.
 - **Compliance**: what the assistant does is recorded in Bytebase's audit log, as it is for the console.
 
 Bytebase supports PostgreSQL, MySQL, SQL Server, Oracle, MongoDB and [more](https://docs.bytebase.com/introduction/supported-databases).
@@ -157,7 +180,7 @@ Generated from Bytebase 3.25.0.
 | Connects to | Your Bytebase instance | Databases directly, with a connection string |
 | Needs Bytebase | Yes | No |
 | Sign-in | Your Bytebase account, through OAuth | Database credentials |
-| Changes | Go through the project's review and approval | Run on the database directly; a read-only mode is available |
+| Changes | Proposed as plans and issues under the project's approval policy. Direct writes only where the workspace policy and your permissions allow | Run on the database directly; a read-only mode is available |
 | Best for | Teams that govern database access and changes | Local development and lightweight read access |
 
 ## How it works
