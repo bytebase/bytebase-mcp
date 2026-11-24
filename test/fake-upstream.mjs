@@ -27,7 +27,7 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
   const sessions = new Map();
   const eventStreams = new Set();
   const requests = [];
-  const state = { resourceMetadata, refreshDelayMs: 0, listDelayMs: 0, callDelayMs: 0, revokeStalls: false, withdrawFormAfterMs: 0, gatewayStatus: 0 };
+  const state = { resourceMetadata, refreshDelayMs: 0, listDelayMs: 0, callDelayMs: 0, revokeStalls: false, withdrawFormAfterMs: 0, gatewayStatus: 0, gatewayPath: "" };
   const registrations = [];
   const initializes = [];
   const toolCalls = [];
@@ -57,7 +57,7 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     requests.push(`${req.method} ${url.pathname}`);
-    if (state.gatewayStatus) {
+    if (state.gatewayStatus && url.pathname.startsWith(state.gatewayPath)) {
       res.writeHead(state.gatewayStatus, { "Content-Type": "text/html" }).end("<html><body>Bad Gateway</body></html>");
       return;
     }
@@ -266,6 +266,10 @@ export async function startFakeBytebase({ resourceMetadata = true, pageSize = 0,
     /** Answers every request with this status, as a reverse proxy does while Bytebase is down; 0 stops. */
     set gatewayStatus(status) {
       state.gatewayStatus = status;
+    },
+    /** Limits gatewayStatus to paths starting with this prefix; "" means every path. */
+    set gatewayPath(prefix) {
+      state.gatewayPath = prefix;
     },
     /** Makes the revocation endpoint accept requests and never answer. */
     set revokeStalls(value) {

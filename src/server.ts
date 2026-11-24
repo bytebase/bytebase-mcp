@@ -49,10 +49,12 @@ async function withinBound<T>(work: (signal: AbortSignal) => Promise<T>, ms: num
 
 /** Network errors: the instance gave no answer at all. */
 function isUnreachable(err: unknown): boolean {
-  // The SDK's transport error carries the HTTP status as its code, wrapped as a cause.
+  // The SDK's transport error carries the HTTP status as its code, wrapped as a cause; its OAuth
+  // discovery errors carry it only in their text ("HTTP 503 trying to load ... metadata").
   for (let e: unknown = err; e instanceof Error; e = e.cause) {
     if (isGatewayStatus((e as Error & { code?: unknown }).code)) return true;
   }
+  if (/\bHTTP 50[234] trying to load\b/.test(describe(err))) return true;
   return /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|fetch failed/i.test(describe(err));
 }
 
