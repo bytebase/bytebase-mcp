@@ -34,7 +34,7 @@ The assistant can use every tool your Bytebase instance serves. They fall into t
 
 ### Database change
 
-Describe the change in the chat. Bytebase turns it into a plan and an issue and runs the plan checks. Approval and rollout follow the project's policy, so nothing reaches the database unreviewed.
+Describe the change in the chat. Bytebase turns it into a plan and an issue and runs the plan checks. Approval and rollout follow the project's policy, the same as a change raised in the console.
 
 ![You ask to add a phone column to the customer table. The assistant calls propose_database_change. Bytebase creates a plan and an issue, runs checks, and waits for approval before rollout.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-change.svg)
 
