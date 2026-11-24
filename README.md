@@ -5,30 +5,26 @@
 
 **Let AI assistants work with your databases under the same review, access control and audit as your team.**
 
+[Docs](https://docs.bytebase.com/integrations/mcp) · [npm](https://www.npmjs.com/package/@bytebase/bytebase-mcp) · [Bytebase](https://github.com/bytebase/bytebase) · [Install Bytebase](https://docs.bytebase.com/get-started/self-host-vs-cloud)
+
 > [!NOTE]
 > Bytebase MCP needs a running [Bytebase](https://github.com/bytebase/bytebase) instance, either Bytebase Cloud or self-hosted. It does nothing without one. If you want a standalone database MCP server that connects straight to a database, see [DBHub](https://github.com/bytebase/dbhub).
 
-The official npm package for the MCP server built into [Bytebase](https://github.com/bytebase/bytebase), the open-source database governance platform. It lets AI assistants that can only run MCP servers as local commands use your Bytebase instance: query data, inspect schemas, and propose database changes, all under Bytebase's approvals, access control, data masking, and audit logging.
+The official npm package for the MCP server built into [Bytebase](https://github.com/bytebase/bytebase), the open-source database governance platform. AI assistants query data, inspect schemas and propose database changes through your Bytebase instance, under its approvals, access control, data masking and audit logging.
 
 ![Two ways into the MCP server built into Bytebase: HTTP clients connect straight to it, stdio-only clients go through this package, and Bytebase applies approval, access control, masking and audit in front of your databases](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/architecture.svg)
 
 The package contains no Bytebase logic. Once you sign in, it lists your instance's own tools and forwards every call to the instance, where permissions, the workspace MCP access policy, approvals and audit apply exactly as in the console. Nothing is stored locally except the OAuth token.
 
-> Most clients, including Claude Code, Claude Desktop, Cursor, Codex, Copilot CLI, Gemini CLI and VS Code, connect to remote MCP servers over HTTP. They do not need this package: point them straight at `<your Bytebase URL>/mcp`. See the [MCP integration docs](https://docs.bytebase.com/integrations/mcp). This package is for clients that only start local commands, and for MCP directories.
+## Do you need this package?
 
-## What you get from Bytebase
+Most MCP clients do not. Bytebase already serves MCP over HTTP, so check how your client connects:
 
-Bytebase sits between your users, people and AI agents alike, and your databases.
-
-![Bytebase as one control plane between people, AI agents and applications on one side and your databases on the other](https://raw.githubusercontent.com/bytebase/bytebase/main/docs/assets/middleware.svg)
-
-An assistant connected through this package works inside the same rules as everyone else on the instance:
-
-- **Change management**: a change the assistant proposes becomes a plan and an issue in Bytebase. Plan checks run on it, and approval and rollout follow the project's policy.
-- **Access control**: the assistant acts as the account that signed in and can do only what that account can. Queries return data with the project's masking applied, and it can request time-boxed access instead of holding standing permissions.
-- **Compliance**: what the assistant does is recorded in Bytebase's audit log, as it is for the console.
-
-Bytebase supports PostgreSQL, MySQL, SQL Server, Oracle, MongoDB and [more](https://docs.bytebase.com/introduction/supported-databases).
+| Your MCP client | What to use |
+| --- | --- |
+| Connects to remote MCP servers over HTTP. Claude Code, Claude Desktop, Cursor, Codex, Copilot CLI, Gemini CLI and VS Code all do. | No package. Point the client at `<your Bytebase URL>/mcp`. See the [MCP integration docs](https://docs.bytebase.com/integrations/mcp). |
+| Only starts MCP servers as local commands | This package |
+| An MCP directory that lists servers by package | This package |
 
 ## What you can do
 
@@ -59,17 +55,22 @@ The images illustrate the flow. What you see depends on your instance's policies
 A few of the other things the tools cover:
 
 - **Review**: approve or reject an issue waiting at your approval step.
+- **Set up GitOps**: get the workflow files that set up GitOps for a project.
 - **Administer**: manage masking exemptions and just-in-time access for a project, or call any other Bytebase API operation.
 
-## Bytebase MCP or DBHub?
+## Why go through Bytebase
 
-| | Bytebase MCP | [DBHub](https://github.com/bytebase/dbhub) |
-| --- | --- | --- |
-| Connects to | Your Bytebase instance | Databases directly, with a connection string |
-| Needs Bytebase | Yes | No |
-| Sign-in | Your Bytebase account, through OAuth | Database credentials |
-| Changes | Go through the project's review and approval | Run on the database directly; a read-only mode is available |
-| Best for | Teams that govern database access and changes | Local development and lightweight read access |
+Bytebase sits between your users, people and AI agents alike, and your databases.
+
+![Bytebase as one control plane between people, AI agents and applications on one side and your databases on the other](https://raw.githubusercontent.com/bytebase/bytebase/main/docs/assets/middleware.svg)
+
+An assistant connected through this package works inside the same rules as everyone else on the instance:
+
+- **Change management**: a change the assistant proposes becomes a plan and an issue in Bytebase. Plan checks run on it, and approval and rollout follow the project's policy.
+- **Access control**: the assistant acts as the account that signed in and can do only what that account can. Queries return data with the project's masking applied, and it can request time-boxed access instead of holding standing permissions.
+- **Compliance**: what the assistant does is recorded in Bytebase's audit log, as it is for the console.
+
+Bytebase supports PostgreSQL, MySQL, SQL Server, Oracle, MongoDB and [more](https://docs.bytebase.com/introduction/supported-databases).
 
 ## Requirements
 
@@ -139,6 +140,16 @@ Generated from Bytebase 3.25.0.
 | `search_api` | Discover Bytebase API endpoints. |
 | `set_just_in_time_access` | Turn just-in-time access on or off for one Bytebase project. |
 <!-- tools:end -->
+
+## Bytebase MCP or DBHub?
+
+| | Bytebase MCP | [DBHub](https://github.com/bytebase/dbhub) |
+| --- | --- | --- |
+| Connects to | Your Bytebase instance | Databases directly, with a connection string |
+| Needs Bytebase | Yes | No |
+| Sign-in | Your Bytebase account, through OAuth | Database credentials |
+| Changes | Go through the project's review and approval | Run on the database directly; a read-only mode is available |
+| Best for | Teams that govern database access and changes | Local development and lightweight read access |
 
 ## How it works
 
