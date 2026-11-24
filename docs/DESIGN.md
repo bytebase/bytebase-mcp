@@ -120,7 +120,8 @@ tool call made before it finishes waits for it. A sign-in that fails or times ou
 on its own, so a user who ignores it is not sent repeated browser tabs; a client restart starts it
 again. When the instance cannot be reached (unreachable, as defined under States), opening the session is retried up to 10 times, waiting 1
 second and doubling to at most 5 minutes (about 14 minutes in all), then stops until the client
-restarts; the browser opens only once the instance answers.
+restarts; the browser opens only once the instance answers. Only an opening that has not opened
+the browser is retried: once it has, any failure, unreachable included, is a failed sign-in.
 
 A forwarded request belongs to whoever sent it: **the proxy adds no deadline and no cancellation
 of its own, in either direction, and passes the sender's cancellation on.** The SDK gives every

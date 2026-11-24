@@ -74,6 +74,8 @@ const lockHeld = new AsyncLocalStorage<{ file: string; active: boolean }>();
  */
 export interface SignInPermit {
   active: boolean;
+  /** Set once this opening's browser leg starts; after that a failure is a failed sign-in (D5). */
+  browserOpened?: boolean;
   state?: string;
   verifier?: string;
   pendingCode?: Promise<string>;
@@ -258,6 +260,7 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
     const permit = activePermit();
     if (!permit) throw new SignInRequiredError();
+    permit.browserOpened = true;
     const expectedState = permit.state;
     const portLock = new FileLock(path.join(this.options.home, `callback-${this.options.callbackPort}`));
     const release = await portLock.acquire({ wait: true });
