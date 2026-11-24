@@ -30,35 +30,37 @@ The package also works in clients that support HTTP. It reaches the same server,
 
 ## What you can do
 
-Three examples of what an assistant can do through Bytebase. They are not the full list: the assistant can use every tool your instance serves, listed under [Tools](#tools).
+The assistant can use every tool your Bytebase instance serves. They fall into three areas: database change, access control, and configuration. The images below show two of them in action, and the table after them covers the rest.
 
-### Query data without handing out a database password
+### Database change
 
-The assistant signs in as you, through Bytebase. It reaches the databases your account can reach, and the columns your project masks come back masked.
-
-![You ask which customers signed up last week. The assistant calls query_database. Bytebase checks access, masks the email column, logs the query and returns the rows.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-query.svg)
-
-### Send a change into review
-
-Describe the change in the chat. Bytebase turns it into a plan and an issue and runs the plan checks. Approval and rollout follow the project's policy.
+Describe the change in the chat. Bytebase turns it into a plan and an issue and runs the plan checks. Approval and rollout follow the project's policy, so nothing reaches the database unreviewed.
 
 ![You ask to add a phone column to the customer table. The assistant calls propose_database_change. Bytebase creates a plan and an issue, runs checks, and waits for approval before rollout.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-change.svg)
 
-### Get access for a limited time
+### Access control
 
-When the assistant needs to read something your account cannot, it requests a grant to run one read-only statement on one database. The grant ends on its own.
+The assistant signs in as you, through Bytebase, and never holds a database password. Two controls apply to what it reads.
+
+**Dynamic data masking.** It reaches the databases your account can reach, and the columns your project masks come back masked.
+
+![You ask which customers signed up last week. The assistant calls query_database. Bytebase checks access, masks the email column, logs the query and returns the rows.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-query.svg)
+
+**Just-in-time access.** When it needs to read something your account cannot, it requests a grant to run one read-only statement on one database. The grant ends on its own.
 
 ![You ask to look at one order in production. The assistant calls request_access_grant. Bytebase grants access for a limited window, after which there is no access.](https://raw.githubusercontent.com/bytebase/bytebase-mcp/main/docs/images/scenario-access.svg)
 
 The images illustrate the flow. What you see depends on your instance's policies.
 
-### And more
+### Everything it covers
 
-A few of the other things the tools cover:
+| Area | What the assistant can do |
+| --- | --- |
+| Database change | Propose schema and data changes. Approve or reject an issue at your approval step. Inspect a database's schema. Get the workflow files that set up GitOps for a project. |
+| Access control | Query with masking applied. Request time-boxed access. Turn just-in-time access on or off for a project. Grant or revoke a member's masking exemption. |
+| Configuration | Make a workspace administration change, which you confirm in your client first. Find and call any other Bytebase API operation. |
 
-- **Review**: approve or reject an issue waiting at your approval step.
-- **Set up GitOps**: get the workflow files that set up GitOps for a project.
-- **Administer**: manage masking exemptions and just-in-time access for a project, or call any other Bytebase API operation.
+The exact tools are listed under [Tools](#tools).
 
 ## Why go through Bytebase
 
