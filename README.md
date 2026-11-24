@@ -3,19 +3,55 @@
 [![npm](https://img.shields.io/npm/v/@bytebase/bytebase-mcp)](https://www.npmjs.com/package/@bytebase/bytebase-mcp)
 [![Bytebase MCP server](https://glama.ai/mcp/servers/bytebase/bytebase-mcp/badges/score.svg)](https://glama.ai/mcp/servers/bytebase/bytebase-mcp)
 
-The official npm package for the [Bytebase](https://www.bytebase.com) MCP server. It lets AI assistants that can only run MCP servers as local commands use the MCP server built into your Bytebase instance: query data, inspect schemas, and propose database changes, all under Bytebase's approvals, access control, data masking, and audit logging.
+> [!NOTE]
+> Bytebase MCP works with a [Bytebase](https://github.com/bytebase/bytebase) instance and does nothing without one. If you want a standalone database MCP server that connects straight to a database, see [DBHub](https://github.com/bytebase/dbhub).
+
+The official npm package for the MCP server built into [Bytebase](https://github.com/bytebase/bytebase), the open-source database governance platform. It lets AI assistants that can only run MCP servers as local commands use your Bytebase instance: query data, inspect schemas, and propose database changes, all under Bytebase's approvals, access control, data masking, and audit logging.
 
 ```
-  AI assistant  --stdio-->  bytebase-mcp  --HTTPS + OAuth-->  <your Bytebase>/mcp  -->  your databases
+  MCP client (HTTP)  --------------------------------+
+                                                     v
+  MCP client (stdio only)  -->  bytebase-mcp  -->  Bytebase /mcp  -->  your databases
+                                this package       your instance
 ```
 
 The package contains no Bytebase logic. Once you sign in, it lists your instance's own tools and forwards every call to the instance, where permissions, the workspace MCP access policy, approvals and audit apply exactly as in the console. Nothing is stored locally except the OAuth token.
 
 > Most clients, including Claude Code, Claude Desktop, Cursor, Codex, Copilot CLI, Gemini CLI and VS Code, connect to remote MCP servers over HTTP. They do not need this package: point them straight at `<your Bytebase URL>/mcp`. See the [MCP integration docs](https://docs.bytebase.com/integrations/mcp). This package is for clients that only start local commands, and for MCP directories.
 
+## What you get from Bytebase
+
+Bytebase sits between your users, people and AI agents alike, and your databases. An assistant connected through this package works inside the same rules as everyone else on the instance:
+
+- **Change management**: a change the assistant proposes becomes a plan and an issue in Bytebase. Plan checks run on it, and approval and rollout follow the project's policy.
+- **Access control**: the assistant acts as the account that signed in and can do only what that account can. Queries return data with the project's masking applied, and it can request time-boxed access instead of holding standing permissions.
+- **Compliance**: what the assistant does is recorded in Bytebase's audit log, as it is for the console.
+
+Bytebase supports PostgreSQL, MySQL, SQL Server, Oracle, MongoDB and [more](https://docs.bytebase.com/introduction/supported-databases).
+
+## Use cases
+
+- **Explore and query**: read a database's schema and run SQL without handing the assistant a database password.
+- **Propose a change**: draft a migration in the chat and send it into your team's review flow.
+- **Ask for access**: request permission to run one read-only statement for a limited time.
+- **Review**: approve or reject an issue waiting at your approval step.
+- **Administer**: manage masking exemptions and just-in-time access for a project, or call any other Bytebase API operation.
+
+## Bytebase MCP or DBHub?
+
+| | Bytebase MCP | [DBHub](https://github.com/bytebase/dbhub) |
+| --- | --- | --- |
+| Connects to | Your Bytebase instance | Databases directly, with a connection string |
+| Needs Bytebase | Yes | No |
+| Sign-in | Your Bytebase account, through OAuth | Database credentials |
+| Changes | Go through the project's review and approval | Run on the database directly; a read-only mode is available |
+| Best for | Teams that govern database access and changes | Local development and lightweight read access |
+
 ## Requirements
 
-- A Bytebase instance, 3.22 or later, with its [external URL](https://docs.bytebase.com/get-started/self-host/external-url) configured and the workspace MCP access policy not set to **Disabled**.
+No Bytebase instance yet? See [self-host or cloud](https://docs.bytebase.com/get-started/self-host-vs-cloud) to start one.
+
+- A [Bytebase](https://github.com/bytebase/bytebase) instance, 3.22 or later, with its [external URL](https://docs.bytebase.com/get-started/self-host/external-url) configured and the workspace MCP access policy not set to **Disabled**.
 - Node.js 20 or later, on macOS or Linux. Windows has not been tested yet. If your browser does not open at sign-in there, find the sign-in URL in the server's output (your client's MCP log) and open it yourself.
 - A Bytebase account. The package signs you in through Bytebase's own OAuth; it never sees your password.
 
