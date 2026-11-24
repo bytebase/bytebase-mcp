@@ -1,6 +1,7 @@
 # Bytebase MCP
 
 [![npm](https://img.shields.io/npm/v/@bytebase/bytebase-mcp)](https://www.npmjs.com/package/@bytebase/bytebase-mcp)
+[![Bytebase MCP server](https://glama.ai/mcp/servers/bytebase/bytebase-mcp/badges/score.svg)](https://glama.ai/mcp/servers/bytebase/bytebase-mcp)
 
 The official npm package for the [Bytebase](https://www.bytebase.com) MCP server. It lets AI assistants that can only run MCP servers as local commands use the MCP server built into your Bytebase instance: query data, inspect schemas, and propose database changes, all under Bytebase's approvals, access control, data masking, and audit logging.
 
