@@ -16,55 +16,24 @@ The official npm package for the MCP server built into [Bytebase](https://github
 
 The package contains no Bytebase logic. Once you sign in, it lists your instance's own tools and forwards every call to the instance, where permissions, the workspace MCP access policy, approvals and audit apply exactly as in the console. Nothing is stored locally except the OAuth token.
 
-## Two ways to connect
+## When to use this package
 
-Bytebase serves MCP over HTTP at `<your Bytebase URL>/mcp`. A client can connect to it directly, or run this package on your machine and let it forward. Both reach the same server, with the same tools and the same permissions.
+Bytebase serves MCP over HTTP at `<your Bytebase URL>/mcp`, and a client that can connect to it directly needs nothing installed. See the [MCP integration docs](https://docs.bytebase.com/integrations/mcp). This package is for the other cases:
 
-| | Connect directly | Use this package |
-| --- | --- | --- |
-| How | Add `<your Bytebase URL>/mcp` as a remote MCP server. See the [MCP integration docs](https://docs.bytebase.com/integrations/mcp). | Add the `npx` command under [Setup](#setup). |
-| Works with | Clients that connect to remote MCP servers over HTTP. Claude Code, Claude Desktop, Cursor, Codex, Copilot CLI, Gemini CLI and VS Code all do. | Any client that can start an MCP server as a local command |
-| On your machine | Nothing to install | Node.js, and a small local process that signs in through your browser |
-
-Connecting directly is the shorter path when it works. Use this package when:
-
-- **Your client only starts local MCP servers.**
-- **Your client connects from the cloud and your instance is private.** Claude Desktop and claude.ai reach remote servers [from Anthropic's cloud](https://support.claude.com/en/articles/11175166-getting-started-with-custom-connectors-using-remote-mcp), so an instance on `localhost` or behind a VPN or firewall is out of their reach. A client that connects from your machine, such as Claude Code, does not have this limit.
-- **The client cannot complete the sign-in with your instance.**
-- **You are installing from an MCP directory** that lists servers by package.
+- Your client only starts MCP servers as local commands.
+- Your client connects from the cloud and your instance is private. Claude Desktop and claude.ai reach remote servers [from Anthropic's cloud](https://support.claude.com/en/articles/11175166-getting-started-with-custom-connectors-using-remote-mcp), so they cannot reach an instance on `localhost` or behind a VPN.
+- You are installing from an MCP directory.
 
 ## What you can do
 
-Two things bound what the assistant can do: the MCP access policy an admin sets for the workspace, and your own Bytebase permissions. This is what each policy allows in Bytebase 3.25, condensed from the list the console shows on its MCP Integration page.
+- **Query and explore**: read schemas and run queries. Columns your project masks come back masked.
+- **Change databases**: propose a change in the chat. It becomes a plan and an issue under the project's approval policy.
+- **Get just-in-time access**: request a time-boxed grant to run one read statement. It starts once approved and ends on its own.
+- **Review and administer**: approve issues, manage masking exemptions and rules, set approval rules. You confirm each one in your client first.
 
-| Policy | Capability | Includes |
-| --- | --- | --- |
-| Read-only | Read schemas and metadata | Schemas, databases and instances, projects, changelogs, SQL review configs |
-| Read-only | Read data by running queries | Read-only queries, as far as the engine can show a statement is a read. Masked columns come back masked |
-| Read-only | Read the change workflow | Issues, plans and plan checks, rollouts and their logs, releases |
-| Read-only | Read members, roles and policies | Roles and groups, masking rules and exemptions, approval rules, access grants |
-| Read-write | Propose changes | Create plans and issues and run plan checks. The project's approval policy decides whether a change needs approval |
-| Read-write | Request just-in-time access | A time-boxed grant to run one specific read statement. It starts only once approved, and ends on its own |
-| Read-write | Grant or revoke masking exemptions | For a database, a schema, a table or a column, with an optional expiry |
-| Read-write | Approve or reject issues | The approval rules and the project's self-approval setting apply, as in the console |
-| Read-write | Run rollouts and tasks | Create a rollout, then run, skip or cancel its tasks, under the project's approval policy |
-| Read-write | Run DML and DDL statements | Through queries, as far as the engine and your own permissions allow. Where your client supports confirmations, you confirm each one first |
-| Read-write | Export query results | Export results as files |
-| Read-write | Administer the workspace | Add a PostgreSQL instance to a project, create a CI identity for GitOps, manage approval rules for database changes, set masking rules |
+An admin sets the ceiling for the workspace, Read-only or Read-write, and the assistant can do only what your own account can. Everything it does is recorded in Bytebase's audit log.
 
-Read-write includes everything under Read-only. Approvals, masking exemptions and administration changes are each confirmed in your MCP client before they are made.
-
-**Never, in any mode:** raise this policy, create a service account key, change a person's password, email or MFA, show a stored secret, open an Admin mode session, or read anyone else's query history.
-
-## Why go through Bytebase
-
-The assistant works inside the same rules as everyone else on the instance:
-
-- **Change management**: a change it proposes becomes a plan and an issue, with plan checks, approval and rollout under the project's policy.
-- **Access control**: it signs in as you and never holds a database password. It can do only what your account can, masked data stays masked, and it requests time-boxed access instead of holding standing permissions.
-- **Compliance**: what it does is recorded in Bytebase's audit log.
-
-Bytebase supports PostgreSQL, MySQL, SQL Server, Oracle, MongoDB and [more](https://docs.bytebase.com/introduction/supported-databases).
+These are examples, not the full list. The tools your instance serves are under [Tools](#tools).
 
 ## Requirements
 
