@@ -18,7 +18,7 @@ MCP server for Bytebase. Reads the tool list from your Bytebase instance and for
 
 Usage:
   bytebase-mcp [--url <bytebase-url>]   Serve MCP over stdio (default); signs in when the server starts
-  bytebase-mcp logout [--url <url>]     Forget every sign-in stored for the instance
+  bytebase-mcp logout [--url <url>]     Revoke and forget every sign-in stored for the instance
   bytebase-mcp status [--url <url>]     Show the instance and the stored sign-ins
 
 Environment:

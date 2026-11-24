@@ -13,7 +13,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Config } from "./config.js";
 import { log } from "./log.js";
-import { probeInstance, type InstanceProbe } from "./probe.js";
+import { isGatewayStatus, probeInstance, type InstanceProbe } from "./probe.js";
 import { startupRetryDelaysMs } from "./retry.js";
 import { loadBundledTools } from "./tools.js";
 import { NO_TIMEOUT_MS, Upstream, describe } from "./upstream.js";
@@ -49,6 +49,10 @@ async function withinBound<T>(work: (signal: AbortSignal) => Promise<T>, ms: num
 
 /** Network errors: the instance gave no answer at all. */
 function isUnreachable(err: unknown): boolean {
+  // The SDK's transport error carries the HTTP status as its code, wrapped as a cause.
+  for (let e: unknown = err; e instanceof Error; e = e.cause) {
+    if (isGatewayStatus((e as Error & { code?: unknown }).code)) return true;
+  }
   return /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|fetch failed/i.test(describe(err));
 }
 

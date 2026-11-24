@@ -87,7 +87,8 @@ is the drift this design removes.
 
 **D3 · The snapshot is generated from an instance and used only when no URL is configured.**
 `src/tools.json` holds `bytebaseVersion`, `generatedAt`, `instructions` and `tools`.
-`npm run sync-tools` regenerates it before a release, against an instance on the target release:
+`npm run sync-tools` regenerates it before a release, against an instance on the latest Bytebase
+release, never a development build, so a directory lists no tool that users cannot get yet:
 it signs in as the package does, reads every page of `tools/list`, and strips the per-session parts
 of the instructions (the account line, and the paragraph Bytebase adds for clients without forms).
 The README's tools table is rendered from it and labeled as a snapshot. A stale snapshot only ages
@@ -117,7 +118,7 @@ startup timeout is not hit.
 has no tools to offer, so the sign-in starts after the client's `initialized` notification, and a
 tool call made before it finishes waits for it. A sign-in that fails or times out is not restarted
 on its own, so a user who ignores it is not sent repeated browser tabs; a client restart starts it
-again. When the instance cannot be reached, opening the session is retried up to 10 times, waiting 1
+again. When the instance cannot be reached (unreachable, as defined under States), opening the session is retried up to 10 times, waiting 1
 second and doubling to at most 5 minutes (about 14 minutes in all), then stops until the client
 restarts; the browser opens only once the instance answers.
 
@@ -141,7 +142,10 @@ hour idle. Reopening never cuts off calls already in flight on the old session: 
 so they finish and return their results, and the old session closes after them. The SDK drives OAuth:
 protected-resource discovery, dynamic client registration, PKCE, token exchange. The package
 handles the browser leg on the fixed loopback port 51789 (`BYTEBASE_MCP_CALLBACK_PORT`), and
-prints the sign-in URL only once that port is listening.
+prints the sign-in URL only once that port is listening. The URL comes from the instance's OAuth
+metadata, so the proxy opens it in a browser only if it is http(s), and never through a shell (on
+Windows, `rundll32 url.dll,FileProtocolHandler`, since `cmd` would run what a URL's `|` or `^`
+introduces); otherwise the printed URL is all there is.
 
 **D6 · The real client's identity reaches the instance.** A sign-in belongs to one client
 application on one instance. The proxy registers one OAuth client per `(instance, client)`, named
@@ -215,15 +219,16 @@ it answers as Bytebase, and the stored sign-ins by client, without signing in. `
 A configured proxy decides its state at startup from two facts: whether a stored sign-in opens a
 session within the initialize bound without asking the user, and what
 `GET <base>/.well-known/oauth-protected-resource/mcp` returns. A JSON document whose `resource` is
-`<base>/mcp` means Bytebase; any other answer means not Bytebase; no answer within the bound means
-unreachable.
+`<base>/mcp` means Bytebase. No answer within the bound, or HTTP 502, 503 or 504 (a gateway
+answering for a Bytebase that is down or restarting), means unreachable, here and in D5's retry.
+Any other answer means not Bytebase.
 
 | State | Instructions at initialize | `tools/list` | `tools/call` |
 | --- | --- | --- | --- |
 | **S1** No URL configured | A one-line note (no Bytebase instance is connected; set `BYTEBASE_URL` to the instance's external URL in the client's config and restart), then the snapshot's instructions. | The snapshot's tools. | Error result with the same fix. Nothing is sent anywhere. |
 | **S2** Signed in | The instance's own, verbatim. | The session's, cursors passed through. | Forwarded. |
 | **S3** Bytebase, no session | Fixed: names the instance; tools appear after signing in to Bytebase in the browser. Plus the form sentence (D4). | Empty until the session opens, then the session's, announced with `tools/list_changed`. | Waits for the sign-in, then forwards. |
-| **S4** Unreachable, or not Bytebase | Fixed: names the URL and the reason. Unreachable gives the network error; not Bytebase says to check that the value is the instance's external URL. Plus the form sentence (D4). | Empty; when a retried opening succeeds, as in S3. | Tries to open a session; on failure, an error result with the reason. |
+| **S4** Unreachable, or not Bytebase | Fixed: names the URL and the reason. Unreachable gives the network error or the gateway's status; not Bytebase says to check that the value is the instance's external URL. Plus the form sentence (D4). | Empty; when a retried opening succeeds, as in S3. | Tries to open a session; on failure, an error result with the reason. |
 
 Rules that hold in every state:
 
@@ -262,8 +267,8 @@ protected-resource document, an OAuth server and an MCP endpoint built with the 
    proxy without a session, rules 1–2, and the README. Removes `src/catalog.ts` and the catalog
    paths in `src/server.ts` and `src/index.ts` (`status` stops reporting a catalog). Restores
    `src/tools.ts`, `scripts/sync-tools.mjs` and `scripts/render-readme.mjs`, adds the build step
-   that copies the snapshot into `dist/`, and seeds `src/tools.json` from a current Bytebase build
-   with `sync-tools`, so S1 carries current instructions. Tests: `test/smoke.test.mjs` by state,
+   that copies the snapshot into `dist/`, and seeds `src/tools.json` from the latest Bytebase
+   release with `sync-tools`, so S1 carries current instructions. Tests: `test/smoke.test.mjs` by state,
    and the existing `test/sessions.test.mjs` updated where a state's name or `status`'s output
    changed.
 2. **Pages and recovery.** Delivers the rest of D2 and D5 and rule 3: cursors passed through to the
@@ -286,7 +291,7 @@ protected-resource document, an OAuth server and an MCP endpoint built with the 
   headless machine anyway).
 - An npm snippet on the console's MCP page, and the client application's name in the audit table.
   Both are work in the main repository.
-- Windows and elicitation forwarding were never exercised; a manual run comes before 1.0.
+- Windows has never been run, so the README says so; a manual run comes before 1.0.
 
 ## Kept from the first version
 

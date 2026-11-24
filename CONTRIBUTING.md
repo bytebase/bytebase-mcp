@@ -145,8 +145,8 @@ The automated tests do not cover these:
 ## Keeping the snapshot current
 
 `src/tools.json` is the tool list MCP directories see before an instance is configured; a
-configured server never reads it. Before a release, regenerate it from an instance on the target
-Bytebase release:
+configured server never reads it. Before a release, regenerate it from an instance on the latest
+Bytebase release, never a development build, so directories list no tool users cannot get yet:
 
 ```bash
 npm run build
