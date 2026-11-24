@@ -14,7 +14,7 @@ import {
   type Implementation,
   type ListToolsResult,
 } from "@modelcontextprotocol/sdk/types.js";
-import { FileOAuthClientProvider, SignInRequiredError, clientIdentity, signInPermitted } from "./auth.js";
+import { FileOAuthClientProvider, SignInRequiredError, clientIdentity, signInPermitted, type SignInPermit } from "./auth.js";
 import { mcpEndpoint, type Config } from "./config.js";
 import { log } from "./log.js";
 
@@ -184,9 +184,12 @@ export class Upstream {
   }
 
   private async connect(interactive: boolean): Promise<Client> {
-    const permit = { active: interactive };
+    const permit: SignInPermit = { active: interactive };
     try {
       return await signInPermitted.run(permit, () => this.attemptConnect(interactive));
+    } catch (err) {
+      if (permit.browserOpened && typeof err === "object" && err !== null) failedAfterBrowser.add(err);
+      throw err;
     } finally {
       permit.active = false;
     }
@@ -256,6 +259,13 @@ function hint(err: unknown): string {
   }
   if (/sign-in timed out/i.test(text)) return ". Call a tool again to restart the sign-in";
   return "";
+}
+
+const failedAfterBrowser = new WeakSet<object>();
+
+/** Whether an opening failed after its browser sign-in started, so it is not retried (docs/DESIGN.md, D5). */
+export function isFailedSignIn(err: unknown): boolean {
+  return typeof err === "object" && err !== null && failedAfterBrowser.has(err);
 }
 
 export function describe(err: unknown): string {

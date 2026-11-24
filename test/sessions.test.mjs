@@ -342,6 +342,24 @@ test("D5: a first run whose OAuth discovery gets a gateway's 503 is retried, the
   assert.deepEqual((await proxy.client.listTools()).tools.map((tool) => tool.name), ["query_database", "get_schema"]);
 });
 
+test("D5: a sign-in that fails after the browser opened is not retried, even on a gateway's 503", { timeout: 30_000 }, async (t) => {
+  const bytebase = await startFakeBytebase();
+  t.after(() => bytebase.close());
+  const proxy = await connect({ url: bytebase.url, home: freshHome(), port: nextPort++ });
+  t.after(() => proxy.client.close());
+  const url = await proxy.nextSignIn();
+  // The SDK discovers the authorization server again before exchanging the code.
+  bytebase.gatewayPath = "/.well-known/oauth-authorization-server";
+  bytebase.gatewayStatus = 503;
+  await completeSignIn(url);
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  bytebase.gatewayStatus = 0;
+
+  // A retry, if any, would start a new browser sign-in within a few seconds now that the gateway answers.
+  const again = await Promise.race([proxy.nextSignIn(), new Promise((resolve) => setTimeout(() => resolve(undefined), 5000))]);
+  assert.equal(again, undefined, "no second browser sign-in was started");
+});
+
 test("D5: after an outage, tools/list reopens the session with the stored sign-in", async (t) => {
   const bytebase = await startFakeBytebase();
   t.after(() => bytebase.close());

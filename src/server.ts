@@ -16,7 +16,7 @@ import { log } from "./log.js";
 import { isGatewayStatus, probeInstance, type InstanceProbe } from "./probe.js";
 import { startupRetryDelaysMs } from "./retry.js";
 import { loadBundledTools } from "./tools.js";
-import { NO_TIMEOUT_MS, Upstream, describe } from "./upstream.js";
+import { NO_TIMEOUT_MS, Upstream, describe, isFailedSignIn } from "./upstream.js";
 import { PACKAGE_VERSION } from "./version.js";
 
 /** How long initialize waits for a stored sign-in or the instance probe (docs/DESIGN.md, D4). */
@@ -178,7 +178,7 @@ export function createServer(config: Config): { server: Server; upstream: () => 
         await openAndAnnounce(url, true);
         return;
       } catch (err) {
-        if (!isUnreachable(err)) {
+        if (isFailedSignIn(err) || !isUnreachable(err)) {
           log(`sign-in failed: ${describe(err)}`);
           return;
         }
